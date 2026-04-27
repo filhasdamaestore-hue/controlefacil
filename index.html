@@ -243,7 +243,7 @@ textarea{resize:vertical;min-height:80px}
     <div class="sp-feat"><span class="sp-feat-icon">📲</span><span class="sp-feat-txt">Mensagem pronta no WhatsApp</span></div>
     <div class="sp-feat"><span class="sp-feat-icon">☁️</span><span class="sp-feat-txt">Dados salvos na nuvem — acesse de qualquer lugar</span></div>
   </div>
-  <button class="sp-btn" onclick="entrar()">Entrar no app →</button>
+  <button class="sp-btn" id="sp-btn">Entrar no app →</button>
   <div class="sp-copy">ControleFácil • Todos os direitos reservados</div>
 </div>
 
@@ -254,8 +254,8 @@ textarea{resize:vertical;min-height:80px}
     <div class="auth-title">Controle<span>Fácil</span></div>
     <div class="auth-sub">Gestão simples para sua loja</div>
     <div class="auth-tabs">
-      <button class="auth-tab on" onclick="authTab('login')">Entrar</button>
-      <button class="auth-tab" onclick="authTab('signup')">Criar conta</button>
+      <button class="auth-tab on" data-tab="login">Entrar</button>
+      <button class="auth-tab" data-tab="signup">Criar conta</button>
     </div>
     <div id="auth-login">
       <label class="auth-label">E-mail</label>
@@ -264,7 +264,7 @@ textarea{resize:vertical;min-height:80px}
       <input class="auth-input" id="login-senha" type="password" placeholder="Sua senha">
       <button class="auth-btn" onclick="fazerLogin()" id="btn-login">Entrar</button>
       <div style="text-align:center;margin-top:10px">
-        <span style="font-size:12px;color:rgba(255,255,255,.3);cursor:pointer;text-decoration:underline" onclick="esqueceuSenha()">Esqueci minha senha</span>
+        <span style="font-size:12px;color:rgba(255,255,255,.3);cursor:pointer;text-decoration:underline" id="btn-esqueceu">Esqueci minha senha</span>
       </div>
     </div>
     <div id="auth-signup" style="display:none">
@@ -539,26 +539,45 @@ function syncing(on){document.getElementById('syncing').classList.toggle('on',on
 // ══════════════════════════════════════
 function entrar(){
   const sp=document.getElementById('splash');
+  sp.style.transition='opacity .4s';
   sp.style.opacity='0';
   sp.style.pointerEvents='none';
   setTimeout(()=>{
     sp.style.display='none';
-    document.getElementById('auth-screen').style.display='flex';
-    document.getElementById('auth-screen').classList.add('on');
-  },400);
+    const auth=document.getElementById('auth-screen');
+    auth.style.display='flex';
+  },420);
 }
+
+document.addEventListener('DOMContentLoaded',function(){
+  // splash
+  const btn=document.getElementById('sp-btn');
+  if(btn) btn.addEventListener('click', entrar);
+
+  // login
+  document.getElementById('btn-login').addEventListener('click', fazerLogin);
+  document.getElementById('btn-signup').addEventListener('click', criarConta);
+
+  // esqueceu senha
+  const esq=document.getElementById('btn-esqueceu');
+  if(esq) esq.addEventListener('click', esqueceuSenha);
+
+  // auth tabs
+  document.querySelectorAll('.auth-tab').forEach(function(tab){
+    tab.addEventListener('click', function(){
+      const t=this.dataset.tab;
+      document.querySelectorAll('.auth-tab').forEach(b=>b.classList.remove('on'));
+      this.classList.add('on');
+      document.getElementById('auth-login').style.display=t==='login'?'block':'none';
+      document.getElementById('auth-signup').style.display=t==='signup'?'block':'none';
+      document.getElementById('auth-error').textContent='';
+    });
+  });
+});
 
 // ══════════════════════════════════════
 // AUTH
 // ══════════════════════════════════════
-function authTab(t){
-  document.querySelectorAll('.auth-tab').forEach(b=>b.classList.remove('on'));
-  event.target.classList.add('on');
-  document.getElementById('auth-login').style.display=t==='login'?'block':'none';
-  document.getElementById('auth-signup').style.display=t==='signup'?'block':'none';
-  document.getElementById('auth-error').textContent='';
-}
-
 async function fazerLogin(){
   const email=document.getElementById('login-email').value.trim();
   const senha=document.getElementById('login-senha').value;
