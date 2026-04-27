@@ -5,7 +5,155 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ControleFácil</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+// ══ Mini Supabase client sem CDN ══
+const SUPA_URL='https://pftscidpghkqchwmpluh.supabase.co';
+const SUPA_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBmdHNjaWRwZ2hrcWNod21wbHVoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcyMjE1NTksImV4cCI6MjA5Mjc5NzU1OX0.LcHgQdLdK3ZBxG1QWiazPUosKeaLVDUOz4vA8rT9cbg';
+let _token=null,_user=null,_refreshToken=null;
+
+function _hdrs(extra){
+  const h={'Content-Type':'application/json','apikey':SUPA_KEY};
+  if(_token)h['Authorization']='Bearer '+_token;
+  return Object.assign(h,extra||{});
+}
+
+async function _api(path,opts){
+  const r=await fetch(SUPA_URL+path,opts);
+  const j=await r.json().catch(()=>({}));
+  return{data:j,status:r.status,ok:r.ok};
+}
+
+const sb={
+  auth:{
+    async signInWithPassword({email,password}){
+      const r=await _api('/auth/v1/token?grant_type=password',{
+        method:'POST',headers:_hdrs(),
+        body:JSON.stringify({email,password})
+      });
+      if(r.ok&&r.data.access_token){
+        _token=r.data.access_token;
+        _refreshToken=r.data.refresh_token;
+        _user=r.data.user;
+        localStorage.setItem('cf_token',_token);
+        localStorage.setItem('cf_refresh',_refreshToken||'');
+        localStorage.setItem('cf_user',JSON.stringify(_user));
+        if(sb.auth._cb)sb.auth._cb('SIGNED_IN',{user:_user});
+        return{data:r.data,error:null};
+      }
+      return{data:null,error:r.data};
+    },
+    async signUp({email,password,options}){
+      const r=await _api('/auth/v1/signup',{
+        method:'POST',headers:_hdrs(),
+        body:JSON.stringify({email,password,data:options?.data||{}})
+      });
+      if(r.ok)return{data:r.data,error:null};
+      return{data:null,error:r.data};
+    },
+    async signOut(){
+      await _api('/auth/v1/logout',{method:'POST',headers:_hdrs()});
+      _token=null;_user=null;_refreshToken=null;
+      localStorage.removeItem('cf_token');
+      localStorage.removeItem('cf_refresh');
+      localStorage.removeItem('cf_user');
+    },
+    async resetPasswordForEmail(email){
+      const r=await _api('/auth/v1/recover',{
+        method:'POST',headers:_hdrs(),
+        body:JSON.stringify({email})
+      });
+      return r.ok?{error:null}:{error:r.data};
+    },
+    async restoreSession(){
+      const t=localStorage.getItem('cf_token');
+      const u=localStorage.getItem('cf_user');
+      if(t&&u){
+        _token=t;_user=JSON.parse(u);
+        // verify token still valid
+        const r=await _api('/auth/v1/user',{headers:_hdrs()});
+        if(r.ok){
+          _user=r.data;
+          if(sb.auth._cb)sb.auth._cb('SIGNED_IN',{user:_user});
+          return true;
+        }else{
+          // token expired, try refresh
+          const rf=localStorage.getItem('cf_refresh');
+          if(rf){
+            const rr=await _api('/auth/v1/token?grant_type=refresh_token',{
+              method:'POST',headers:_hdrs(),
+              body:JSON.stringify({refresh_token:rf})
+            });
+            if(rr.ok&&rr.data.access_token){
+              _token=rr.data.access_token;
+              _user=rr.data.user;
+              localStorage.setItem('cf_token',_token);
+              localStorage.setItem('cf_user',JSON.stringify(_user));
+              if(sb.auth._cb)sb.auth._cb('SIGNED_IN',{user:_user});
+              return true;
+            }
+          }
+          localStorage.removeItem('cf_token');
+          localStorage.removeItem('cf_user');
+        }
+      }
+      return false;
+    },
+    onAuthStateChange(cb){this._cb=cb;},
+    _cb:null,
+    getUser(){return _user;}
+  },
+  from(table){
+    return{
+      _table:table,_filters:[],_order:null,_single:false,_sel:'*',
+      select(s){this._sel=s||'*';return this;},
+      eq(col,val){this._filters.push(`${col}=eq.${encodeURIComponent(val)}`);return this;},
+      order(col,{ascending}={}){this._order=`${col}.${ascending?'asc':'desc'}`;return this;},
+      single(){this._single=true;return this;},
+      async _run(method,body){
+        let url=`${SUPA_URL}/rest/v1/${this._table}?select=${this._sel}`;
+        if(this._filters.length)url+='&'+this._filters.join('&');
+        if(this._order)url+=`&order=${this._order}`;
+        const opts={method:method||'GET',headers:_hdrs({'Prefer':method==='POST'?'return=representation':'return=representation'})};
+        if(body)opts.body=JSON.stringify(body);
+        const r=await fetch(url,opts);
+        if(r.status===204)return{data:null,error:null};
+        const j=await r.json().catch(()=>({}));
+        if(!r.ok)return{data:null,error:j};
+        const d=Array.isArray(j)?(this._single?j[0]||null:j):j;
+        return{data:d,error:null};
+      },
+      async get(){return this._run('GET');},
+      async insert(body){
+        const url=`${SUPA_URL}/rest/v1/${this._table}`;
+        const r=await fetch(url,{method:'POST',headers:_hdrs({'Prefer':'return=representation'}),body:JSON.stringify(body)});
+        const j=await r.json().catch(()=>({}));
+        if(!r.ok)return{data:null,error:j};
+        return{data:Array.isArray(j)?j[0]:j,error:null};
+      },
+      async update(body){
+        let url=`${SUPA_URL}/rest/v1/${this._table}?`;
+        if(this._filters.length)url+=this._filters.join('&');
+        const r=await fetch(url,{method:'PATCH',headers:_hdrs({'Prefer':'return=representation'}),body:JSON.stringify(body)});
+        const j=await r.json().catch(()=>({}));
+        return{data:j,error:r.ok?null:j};
+      },
+      async upsert(body,{onConflict}={}){
+        let url=`${SUPA_URL}/rest/v1/${this._table}`;
+        if(onConflict)url+=`?on_conflict=${onConflict}`;
+        const r=await fetch(url,{method:'POST',headers:_hdrs({'Prefer':'return=representation,resolution=merge-duplicates'}),body:JSON.stringify(body)});
+        const j=await r.json().catch(()=>({}));
+        return{data:j,error:r.ok?null:j};
+      },
+      async delete(){
+        let url=`${SUPA_URL}/rest/v1/${this._table}?`;
+        if(this._filters.length)url+=this._filters.join('&');
+        const r=await fetch(url,{method:'DELETE',headers:_hdrs()});
+        return{error:r.ok?null:await r.json().catch(()=>({}))};
+      }
+    };
+  }
+};
+</script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -485,11 +633,6 @@ textarea{resize:vertical;min-height:80px}
 // ══════════════════════════════════════
 // SUPABASE
 // ══════════════════════════════════════
-const SUPA_URL = 'https://pftscidpghkqchwmpluh.supabase.co';
-const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBmdHNjaWRwZ2hrcWNod21wbHVoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcyMjE1NTksImV4cCI6MjA5Mjc5NzU1OX0.LcHgQdLdK3ZBxG1QWiazPUosKeaLVDUOz4vA8rT9cbg';
-let sb = null;
-try{ sb = supabase.createClient(SUPA_URL, SUPA_KEY); }catch(e){ console.error('Supabase erro:',e); }
-
 // ══════════════════════════════════════
 // ESTADO
 // ══════════════════════════════════════
@@ -612,13 +755,13 @@ async function sair(){
 // ══════════════════════════════════════
 async function carregarDados(){
   loading(true);
-  const uid=user.id;
+  const uid=_user.id;
   try{
     const[rCli,rProd,rCaixa,rCfg]=await Promise.all([
-      sb.from('clientes').select('*').eq('user_id',uid).order('criado',{ascending:false}),
-      sb.from('produtos').select('*').eq('user_id',uid).order('criado',{ascending:true}),
-      sb.from('caixa').select('*').eq('user_id',uid).order('data',{ascending:false}),
-      sb.from('config').select('*').eq('user_id',uid).single()
+      sb.from('clientes').select('*').eq('user_id',uid).order('criado',{ascending:false}).get(),
+      sb.from('produtos').select('*').eq('user_id',uid).order('criado',{ascending:true}).get(),
+      sb.from('caixa').select('*').eq('user_id',uid).order('data',{ascending:false}).get(),
+      sb.from('config').select('*').eq('user_id',uid).single().get()
     ]);
     db.clientes=(rCli.data||[]).map(r=>({...r.dados,id:r.id,_rid:r.id}));
     db.produtos=(rProd.data||[]).map(r=>({...r.dados,id:r.id,_rid:r.id}));
@@ -634,7 +777,7 @@ async function carregarDados(){
 // ══════════════════════════════════════
 async function saveCliente(c){
   syncing(true);
-  const uid=user.id;
+  const uid=_user.id;
   if(c._rid){
     await sb.from('clientes').update({dados:limpar(c),user_id:uid}).eq('id',c._rid);
   }else{
@@ -650,7 +793,7 @@ async function deletarCliente(rid){
 }
 async function saveProduto(p){
   syncing(true);
-  const uid=user.id;
+  const uid=_user.id;
   if(p._rid){
     await sb.from('produtos').update({dados:limpar(p),user_id:uid}).eq('id',p._rid);
   }else{
@@ -666,7 +809,7 @@ async function deletarProduto(rid){
 }
 async function saveMov(m){
   syncing(true);
-  const uid=user.id;
+  const uid=_user.id;
   if(m._rid){
     await sb.from('caixa').update({dados:limpar(m),user_id:uid}).eq('id',m._rid);
   }else{
@@ -682,7 +825,7 @@ async function deletarMov(rid){
 }
 async function saveCfg(){
   syncing(true);
-  const uid=user.id;
+  const uid=_user.id;
   await sb.from('config').upsert({user_id:uid,dados:db.config},{onConflict:'user_id'});
   syncing(false);
 }
@@ -692,11 +835,12 @@ function limpar(obj){const o={...obj};delete o._rid;return o;}
 // INICIAR APP
 // ══════════════════════════════════════
 function iniciarApp(){
+  user=_user;
   document.getElementById('auth-screen').classList.add('hide');
   document.getElementById('app-header').style.display='flex';
   document.getElementById('app-wrap').style.display='block';
   document.getElementById('hdate').textContent=new Date().toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'long'});
-  document.getElementById('user-email-display').textContent='Conta: '+user.email;
+  document.getElementById('user-email-display').textContent='Conta: '+(_user?_user.email:'');
   document.getElementById('c-loja').value=db.config.loja||'';
   document.getElementById('c-pix').value=db.config.pix||'';
   document.getElementById('c-msg').value=db.config.msg||'';
@@ -1240,16 +1384,14 @@ document.querySelectorAll('.mover').forEach(m=>m.addEventListener('click',e=>{if
 // ══════════════════════════════════════
 // INIT
 // ══════════════════════════════════════
-if(sb){
-  sb.auth.onAuthStateChange(async(event, session)=>{
-    if(session){
-      user=session.user;
-      await carregarDados();
-    }
-  });
-}else{
-  document.getElementById('auth-error').textContent='Erro ao conectar. Verifique sua internet e recarregue.';
-}
+sb.auth.onAuthStateChange(async(event, session)=>{
+  if(session&&session.user){
+    await carregarDados();
+  }
+});
+
+// tenta restaurar sessão salva
+sb.auth.restoreSession();
 </script>
 </body>
 </html>
