@@ -24,24 +24,11 @@
 body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;font-size:15px;line-height:1.6}
 
 /* ══ SPLASH ══ */
-#splash{display:flex;position:fixed;inset:0;background:#1A0D12;z-index:1000;align-items:center;justify-content:center;flex-direction:column;padding:2rem;transition:opacity .5s}
-#splash.hide{opacity:0;pointer-events:none}
-.sp-logo{font-size:56px;margin-bottom:1rem;animation:pulse 2s infinite}
-.sp-name{font-size:32px;font-weight:700;color:#fff;letter-spacing:-.03em;margin-bottom:.3rem}
-.sp-name span{color:var(--pk2)}
-.sp-tag{font-size:14px;color:rgba(255,255,255,.4);margin-bottom:2.5rem}
-.sp-feats{display:flex;flex-direction:column;gap:8px;width:100%;max-width:300px;margin-bottom:2.5rem}
-.sp-feat{display:flex;align-items:center;gap:12px;background:rgba(255,255,255,.05);border-radius:10px;padding:11px 14px}
-.sp-feat-icon{font-size:18px}
-.sp-feat-txt{font-size:13px;color:rgba(255,255,255,.7);font-weight:500}
-.sp-btn{background:var(--pk);color:#fff;border:none;border-radius:14px;padding:16px 32px;font-size:16px;font-weight:700;font-family:'DM Sans',sans-serif;cursor:pointer;width:100%;max-width:300px;transition:all .15s}
-.sp-btn:hover{background:var(--pk2)}
-.sp-copy{font-size:11px;color:rgba(255,255,255,.2);margin-top:1.5rem}
-@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}
+#splash{display:none}
 
 /* ══ AUTH ══ */
-#auth-screen{display:none;position:fixed;inset:0;background:#1A0D12;z-index:900;align-items:center;justify-content:center;padding:1.5rem;overflow-y:auto}
-#auth-screen.on{display:flex!important}
+#auth-screen{display:flex;position:fixed;inset:0;background:#1A0D12;z-index:900;align-items:center;justify-content:center;padding:1.5rem;overflow-y:auto}
+#auth-screen.hide{display:none!important}
 .auth-box{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:var(--rx);padding:2rem;width:100%;max-width:380px}
 .auth-logo{font-size:36px;text-align:center;margin-bottom:.5rem}
 .auth-title{font-size:20px;font-weight:700;color:#fff;text-align:center;letter-spacing:-.02em;margin-bottom:.25rem}
@@ -231,21 +218,6 @@ textarea{resize:vertical;min-height:80px}
 <body>
 
 <div class="loading-bar" id="loading-bar"></div>
-
-<!-- ══ SPLASH ══ -->
-<div id="splash">
-  <div class="sp-logo">🛍️</div>
-  <div class="sp-name">Controle<span>Fácil</span></div>
-  <div class="sp-tag">Gestão simples para sua loja</div>
-  <div class="sp-feats">
-    <div class="sp-feat"><span class="sp-feat-icon">📦</span><span class="sp-feat-txt">Controle de estoque por tamanho</span></div>
-    <div class="sp-feat"><span class="sp-feat-icon">💰</span><span class="sp-feat-txt">Parcelas e cobranças automáticas</span></div>
-    <div class="sp-feat"><span class="sp-feat-icon">📲</span><span class="sp-feat-txt">Mensagem pronta no WhatsApp</span></div>
-    <div class="sp-feat"><span class="sp-feat-icon">☁️</span><span class="sp-feat-txt">Dados salvos na nuvem — acesse de qualquer lugar</span></div>
-  </div>
-  <button class="sp-btn" id="sp-btn">Entrar no app →</button>
-  <div class="sp-copy">ControleFácil • Todos os direitos reservados</div>
-</div>
 
 <!-- ══ AUTH ══ -->
 <div id="auth-screen">
@@ -515,7 +487,8 @@ textarea{resize:vertical;min-height:80px}
 // ══════════════════════════════════════
 const SUPA_URL = 'https://pftscidpghkqchwmpluh.supabase.co';
 const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBmdHNjaWRwZ2hrcWNod21wbHVoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcyMjE1NTksImV4cCI6MjA5Mjc5NzU1OX0.LcHgQdLdK3ZBxG1QWiazPUosKeaLVDUOz4vA8rT9cbg';
-const sb = supabase.createClient(SUPA_URL, SUPA_KEY);
+let sb = null;
+try{ sb = supabase.createClient(SUPA_URL, SUPA_KEY); }catch(e){ console.error('Supabase erro:',e); }
 
 // ══════════════════════════════════════
 // ESTADO
@@ -550,10 +523,6 @@ function entrar(){
 }
 
 document.addEventListener('DOMContentLoaded',function(){
-  // splash
-  const btn=document.getElementById('sp-btn');
-  if(btn) btn.addEventListener('click', entrar);
-
   // login
   document.getElementById('btn-login').addEventListener('click', fazerLogin);
   document.getElementById('btn-signup').addEventListener('click', criarConta);
@@ -573,20 +542,34 @@ document.addEventListener('DOMContentLoaded',function(){
       document.getElementById('auth-error').textContent='';
     });
   });
+
+  // enter key
+  document.addEventListener('keydown',function(e){
+    if(e.key==='Enter'){
+      const as=document.getElementById('auth-screen');
+      if(!as.classList.contains('hide')){
+        const loginVisible=document.getElementById('auth-login').style.display!=='none';
+        if(loginVisible) fazerLogin(); else criarConta();
+      }
+    }
+  });
 });
 
 // ══════════════════════════════════════
 // AUTH
 // ══════════════════════════════════════
 async function fazerLogin(){
+  if(!sb){setAuthErr('Erro de conexão. Recarregue a página.');return;}
   const email=document.getElementById('login-email').value.trim();
   const senha=document.getElementById('login-senha').value;
   if(!email||!senha){setAuthErr('Preencha e-mail e senha.');return;}
   const btn=document.getElementById('btn-login');
   btn.disabled=true;btn.textContent='Entrando...';
-  const{error}=await sb.auth.signInWithPassword({email,password:senha});
+  try{
+    const{error}=await sb.auth.signInWithPassword({email,password:senha});
+    if(error){setAuthErr('E-mail ou senha incorretos.');}
+  }catch(e){setAuthErr('Erro de conexão: '+e.message);}
   btn.disabled=false;btn.textContent='Entrar';
-  if(error){setAuthErr('E-mail ou senha incorretos.');return;}
 }
 
 async function criarConta(){
@@ -709,7 +692,7 @@ function limpar(obj){const o={...obj};delete o._rid;return o;}
 // INICIAR APP
 // ══════════════════════════════════════
 function iniciarApp(){
-  document.getElementById('auth-screen').classList.remove('on');
+  document.getElementById('auth-screen').classList.add('hide');
   document.getElementById('app-header').style.display='flex';
   document.getElementById('app-wrap').style.display='block';
   document.getElementById('hdate').textContent=new Date().toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'long'});
@@ -1255,14 +1238,18 @@ function cm(id){document.getElementById(id).classList.remove('on');}
 document.querySelectorAll('.mover').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('on');}));
 
 // ══════════════════════════════════════
-// INIT — escuta autenticação
+// INIT
 // ══════════════════════════════════════
-sb.auth.onAuthStateChange(async(event, session)=>{
-  if(session){
-    user=session.user;
-    await carregarDados();
-  }
-});
+if(sb){
+  sb.auth.onAuthStateChange(async(event, session)=>{
+    if(session){
+      user=session.user;
+      await carregarDados();
+    }
+  });
+}else{
+  document.getElementById('auth-error').textContent='Erro ao conectar. Verifique sua internet e recarregue.';
+}
 </script>
 </body>
 </html>
