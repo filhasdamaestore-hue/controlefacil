@@ -375,12 +375,25 @@ textarea{resize:vertical;min-height:80px}
       <input class="auth-input" id="login-email" type="email" placeholder="seu@email.com">
       <label class="auth-label">Senha</label>
       <input class="auth-input" id="login-senha" type="password" placeholder="Sua senha">
-      <button class="auth-btn" id="btn-login">Entrar</button>
+      <button class="auth-btn" id="btn-login" onclick="fazerLogin()">Entrar</button>
       <div style="text-align:center;margin-top:10px">
-        <span style="font-size:12px;color:rgba(255,255,255,.3);cursor:pointer;text-decoration:underline" id="btn-esqueceu">Esqueci minha senha</span>
+        <span style="font-size:12px;color:rgba(255,255,255,.3);cursor:pointer;text-decoration:underline" id="btn-esqueceu" onclick="esqueceuSenha()">Esqueci minha senha</span>
       </div>
     </div>
     <div class="auth-error" id="auth-error"></div>
+    <div style="text-align:center;margin-top:1.5rem;padding-top:1rem;border-top:1px solid rgba(255,255,255,.08)">
+      <div style="font-size:11px;color:rgba(255,255,255,.2);margin-bottom:8px">Área restrita — somente proprietária</div>
+      <button onclick="mostrarCadastro()" id="btn-mostrar-cad" style="font-size:12px;color:rgba(255,255,255,.25);background:none;border:none;cursor:pointer;text-decoration:underline;font-family:'DM Sans',sans-serif">Criar conta</button>
+    </div>
+    <div id="form-cadastro" style="display:none;margin-top:1rem;border-top:1px solid rgba(255,255,255,.08);padding-top:1rem">
+      <label class="auth-label">Nome da loja</label>
+      <input class="auth-input" id="signup-loja" type="text" placeholder="Ex: Boutique da Maria">
+      <label class="auth-label">E-mail</label>
+      <input class="auth-input" id="signup-email" type="email" placeholder="seu@email.com">
+      <label class="auth-label">Senha</label>
+      <input class="auth-input" id="signup-senha" type="password" placeholder="Mínimo 6 caracteres">
+      <button class="auth-btn" id="btn-signup" onclick="criarConta()" style="margin-top:1rem">Criar conta</button>
+    </div>
   </div>
 </div>
 
@@ -648,13 +661,15 @@ function entrar(){
 }
 
 document.addEventListener('DOMContentLoaded',function(){
-  document.getElementById('btn-login').addEventListener('click', fazerLogin);
-  const esq=document.getElementById('btn-esqueceu');
-  if(esq) esq.addEventListener('click', esqueceuSenha);
   document.addEventListener('keydown',function(e){
     if(e.key==='Enter') fazerLogin();
   });
 });
+
+function mostrarCadastro(){
+  const f=document.getElementById('form-cadastro');
+  f.style.display=f.style.display==='none'?'block':'none';
+}
 
 // ══════════════════════════════════════
 // AUTH
