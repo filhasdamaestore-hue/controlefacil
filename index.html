@@ -675,16 +675,37 @@ function mostrarCadastro(){
 // AUTH
 // ══════════════════════════════════════
 async function fazerLogin(){
-  if(!sb){setAuthErr('Erro de conexão. Recarregue a página.');return;}
   const email=document.getElementById('login-email').value.trim();
-  const senha=document.getElementById('login-senha').value;
+  const senha=document.getElementById('login-senha').value.trim();
   if(!email||!senha){setAuthErr('Preencha e-mail e senha.');return;}
   const btn=document.getElementById('btn-login');
   btn.disabled=true;btn.textContent='Entrando...';
+  setAuthErr('Conectando...');
   try{
-    const{error}=await sb.auth.signInWithPassword({email,password:senha});
-    if(error){setAuthErr('E-mail ou senha incorretos.');}
-  }catch(e){setAuthErr('Erro de conexão: '+e.message);}
+    const r=await fetch('https://pftscidpghkqchwmpluh.supabase.co/auth/v1/token?grant_type=password',{
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'apikey':'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBmdHNjaWRwZ2hrcWNod21wbHVoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcyMjE1NTksImV4cCI6MjA5Mjc5NzU1OX0.LcHgQdLdK3ZBxG1QWiazPUosKeaLVDUOz4vA8rT9cbg'
+      },
+      body:JSON.stringify({email,password:senha})
+    });
+    const j=await r.json();
+    if(j.access_token){
+      _token=j.access_token;
+      _refreshToken=j.refresh_token||'';
+      _user=j.user;
+      localStorage.setItem('cf_token',_token);
+      localStorage.setItem('cf_refresh',_refreshToken);
+      localStorage.setItem('cf_user',JSON.stringify(_user));
+      setAuthErr('');
+      await carregarDados();
+    }else{
+      setAuthErr('E-mail ou senha incorretos. ('+( j.error_description||j.msg||'erro')+')')
+    }
+  }catch(e){
+    setAuthErr('Erro de conexão: '+e.message);
+  }
   btn.disabled=false;btn.textContent='Entrar';
 }
 
