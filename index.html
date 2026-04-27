@@ -271,6 +271,11 @@ textarea{resize:vertical;min-height:80px}
 .ia{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .iv{font-size:13px;font-weight:600}
 
+/* ══ TIPO VENDA ══ */
+.tipo-btn{flex:1;padding:12px;border:2px solid var(--bdr2);border-radius:var(--r);background:var(--sur);font-size:14px;font-weight:500;font-family:'DM Sans',sans-serif;cursor:pointer;transition:all .15s;color:var(--tx)}
+.tipo-btn:hover{border-color:var(--pk);background:var(--pk-bg)}
+.tipo-btn.sel{border-color:var(--pk);background:var(--pk-bg);color:var(--pk);font-weight:700}
+
 /* ══ CARRINHO ══ */
 .cart-item{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:var(--sur2);border-radius:var(--r);margin-bottom:6px;gap:8px}
 .cart-item-nome{font-size:13px;font-weight:500}
@@ -435,6 +440,19 @@ textarea{resize:vertical;min-height:80px}
           <span style="font-size:18px;font-weight:700;color:var(--pk)" id="carrinho-total">R$ 0,00</span>
         </div>
       </div>
+      <div id="tipo-venda-wrap" style="display:none;margin-top:12px">
+        <div class="slbl" style="margin-top:0">Tipo de pagamento</div>
+        <div style="display:flex;gap:8px">
+          <button class="tipo-btn" id="tbtn-vista" onclick="selTipoVenda('vista')">
+            💵 À vista
+          </button>
+          <button class="tipo-btn" id="tbtn-prazo" onclick="selTipoVenda('prazo')">
+            💳 A prazo
+          </button>
+        </div>
+        <div id="tipo-info" style="font-size:12px;color:var(--tx3);margin-top:6px"></div>
+      </div>
+
       <div style="margin-top:12px">
         <div class="fl" style="margin-bottom:5px">Produto manual (sem estoque)</div>
         <div style="display:flex;gap:8px">
@@ -474,9 +492,10 @@ textarea{resize:vertical;min-height:80px}
     <div class="mg4" id="est-met"></div>
     <div class="card">
       <div class="ctitle">Adicionar produto ao estoque</div>
+      <div class="fg"><label class="fl">Nome do produto</label><input id="p-nome" type="text" placeholder="Ex: Tênis branco"></div>
       <div class="r2">
-        <div class="fg"><label class="fl">Nome do produto</label><input id="p-nome" type="text" placeholder="Ex: Tênis branco"></div>
-        <div class="fg"><label class="fl">Preço de venda (R$)</label><input id="p-preco" type="number" placeholder="0,00" min="0" step="0.01"></div>
+        <div class="fg"><label class="fl">💵 Preço à vista (R$)</label><input id="p-preco-vista" type="number" placeholder="0,00" min="0" step="0.01"></div>
+        <div class="fg"><label class="fl">💳 Preço a prazo (R$)</label><input id="p-preco-prazo" type="number" placeholder="0,00" min="0" step="0.01"></div>
       </div>
       <div class="r2">
         <div class="fg"><label class="fl">Categoria</label>
@@ -501,7 +520,7 @@ textarea{resize:vertical;min-height:80px}
 
   <!-- CAIXA -->
   <div class="sec" id="s-caixa">
-    <div class="mg4" id="cx-met"></div>
+    <div class="mg4" id="cx-met" style="grid-template-columns:repeat(3,1fr)"></div>
     <div class="card" style="margin-bottom:1rem">
       <div class="ctitle">Registrar movimentação</div>
       <div class="r2">
@@ -591,9 +610,10 @@ textarea{resize:vertical;min-height:80px}
     <button class="mclose" onclick="cm('m-prod')">✕</button>
     <div class="mtitle">Editar produto</div>
     <input type="hidden" id="ep-id">
+    <div class="fg"><label class="fl">Nome</label><input id="ep-nome" type="text"></div>
     <div class="r2">
-      <div class="fg"><label class="fl">Nome</label><input id="ep-nome" type="text"></div>
-      <div class="fg"><label class="fl">Preço (R$)</label><input id="ep-preco" type="number" step="0.01"></div>
+      <div class="fg"><label class="fl">💵 Preço à vista (R$)</label><input id="ep-preco-vista" type="number" step="0.01"></div>
+      <div class="fg"><label class="fl">💳 Preço a prazo (R$)</label><input id="ep-preco-prazo" type="number" step="0.01"></div>
     </div>
     <div class="r2">
       <div class="fg"><label class="fl">Custo (R$)</label><input id="ep-custo" type="number" step="0.01"></div>
@@ -620,7 +640,7 @@ textarea{resize:vertical;min-height:80px}
 // ══════════════════════════════════════
 let user = null;
 let db = {clientes:[],config:{loja:'',pix:'',msg:''},caixa:[],produtos:[]};
-let cxFil='todos', tamFL=[], carrinho=[], pickProd=null, pickTam=null;
+let cxFil='todos', tamFL=[], carrinho=[], pickProd=null, pickTam=null, tipoVenda=null;
 
 // ══════════════════════════════════════
 // HELPERS
@@ -879,9 +899,10 @@ function renderPicker(){
   grid.innerHTML=db.produtos.map((p,i)=>{
     const total=p.tamanhos.reduce((a,t)=>a+t.qtd,0);
     const sem=total<=0&&p.tamanhos.length>0;
+    const precoInfo=p.precoVista?`💵${fmtV(p.precoVista)}${p.precoPrazo?' • 💳'+fmtV(p.precoPrazo):''}`:p.preco?fmtV(p.preco):'';
     return`<div class="pchip${sem?' esg':''}" onclick="${sem?'':` selProd(${i})`}" style="${sem?'opacity:.45;cursor:not-allowed':''}">
       <div class="pchip-nome">${esc(p.nome)}</div>
-      ${p.preco?`<div class="pchip-val">${fmtV(p.preco)}</div>`:''}
+      ${precoInfo?`<div class="pchip-val" style="font-size:11px">${precoInfo}</div>`:''}
       <div class="pchip-stk">${p.tamanhos.length?total+' un.':'Sem tamanhos'}</div>
     </div>`;
   }).join('');
@@ -917,13 +938,42 @@ function confirmarItemCarrinho(){
   if(p.tamanhos.length>0&&pickTam===null){alert('Selecione um tamanho.');return;}
   adicionarAoCarrinho(pickProd,pickTam);
 }
-function cancelarSelecao(){pickProd=null;pickTam=null;document.getElementById('tam-wrap').style.display='none';}
+function cancelarSelecao(){
+  pickProd=null;pickTam=null;tipoVenda=null;
+  document.getElementById('tam-wrap').style.display='none';
+  document.getElementById('tipo-venda-wrap').style.display='none';
+  document.getElementById('tbtn-vista').classList.remove('sel');
+  document.getElementById('tbtn-prazo').classList.remove('sel');
+}
 function adicionarAoCarrinho(pi,ti){
   const p=db.produtos[pi];
   const tam=ti!==null&&p.tamanhos[ti]?p.tamanhos[ti].tam:null;
-  carrinho.push({prodIdx:pi,tamIdx:ti,nome:p.nome+(tam?' Tam.'+tam:''),tam,valor:p.preco||0});
-  pickProd=null;pickTam=null;
+  // mostrar seletor de tipo de venda
+  pickProd=pi;pickTam=ti;
+  const wrap=document.getElementById('tipo-venda-wrap');
+  wrap.style.display='block';
+  const precoVista=p.precoVista||p.preco||0;
+  const precoPrazo=p.precoPrazo||p.preco||0;
+  document.getElementById('tbtn-vista').textContent=`💵 À vista${precoVista?' — '+fmtV(precoVista):''}`;
+  document.getElementById('tbtn-prazo').textContent=`💳 A prazo${precoPrazo?' — '+fmtV(precoPrazo):''}`;
+  document.getElementById('tipo-info').textContent='Selecione como será o pagamento.';
+  wrap.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+
+function selTipoVenda(tipo){
+  tipoVenda=tipo;
+  document.getElementById('tbtn-vista').classList.toggle('sel',tipo==='vista');
+  document.getElementById('tbtn-prazo').classList.toggle('sel',tipo==='prazo');
+  const p=db.produtos[pickProd];
+  const preco=tipo==='vista'?(p.precoVista||p.preco||0):(p.precoPrazo||p.preco||0);
+  const tam=pickTam!==null&&p.tamanhos[pickTam]?p.tamanhos[pickTam].tam:null;
+  const nome=p.nome+(tam?' Tam.'+tam:'');
+  carrinho.push({prodIdx:pickProd,tamIdx:pickTam,nome,tam,valor:preco,tipoVenda:tipo});
+  pickProd=null;pickTam=null;tipoVenda=null;
   document.getElementById('tam-wrap').style.display='none';
+  document.getElementById('tipo-venda-wrap').style.display='none';
+  document.getElementById('tbtn-vista').classList.remove('sel');
+  document.getElementById('tbtn-prazo').classList.remove('sel');
   atualizarCarrinho();
 }
 function removerDoCarrinho(idx){carrinho.splice(idx,1);atualizarCarrinho();}
@@ -1170,16 +1220,18 @@ function remTamFL(i){tamFL.splice(i,1);renderTamFL();}
 
 async function salvarProduto(){
   const nome=document.getElementById('p-nome').value.trim();
-  const preco=parseFloat(document.getElementById('p-preco').value)||0;
+  const precoVista=parseFloat(document.getElementById('p-preco-vista').value)||0;
+  const precoPrazo=parseFloat(document.getElementById('p-preco-prazo').value)||0;
+  const preco=precoVista||precoPrazo; // compatibilidade
   const custo=parseFloat(document.getElementById('p-custo').value)||0;
   const cat=document.getElementById('p-cat').value;
   if(!nome){alert('Nome do produto é obrigatório.');return;}
-  const p={nome,preco,custo,cat,tamanhos:[...tamFL],criado:new Date().toISOString()};
+  const p={nome,preco,precoVista,precoPrazo,custo,cat,tamanhos:[...tamFL],criado:new Date().toISOString()};
   if(custo>0){const m={tipo:'saida',valor:custo,desc:`Compra estoque: ${nome}`,data:today(),cat:'estoque'};await saveMov(m);db.caixa.unshift(m);}
   await saveProduto(p);
   db.produtos.push(p);
   tamFL=[];
-  ['p-nome','p-preco','p-custo'].forEach(id=>document.getElementById(id).value='');
+  ['p-nome','p-preco-vista','p-preco-prazo','p-custo'].forEach(id=>document.getElementById(id).value='');
   renderTamFL();renderEst();renderPicker();
   alert(`"${nome}" cadastrado!`);
 }
@@ -1218,10 +1270,14 @@ function renderEst(){
           <button class="bsec bsm bdng" style="margin-top:6px;width:100%" onclick="delTam(${pi},${ti})">Excluir</button>
         </div>`;}).join('')
       :'<div style="font-size:13px;color:var(--tx3)">Nenhum tamanho.</div>';
+    const precos=[];
+    if(p.precoVista) precos.push(`💵 Vista: ${fmtV(p.precoVista)}`);
+    if(p.precoPrazo) precos.push(`💳 Prazo: ${fmtV(p.precoPrazo)}`);
+    if(!p.precoVista&&!p.precoPrazo&&p.preco) precos.push(`Preço: ${fmtV(p.preco)}`);
     return`<div class="eprod">
       <div class="ephdr" onclick="toggleEprod(${pi})">
         <div><div class="epnome">${esc(p.nome)}</div>
-          <div class="epcat">${catNome[p.cat]||p.cat}${p.preco?' • '+fmtV(p.preco):''}${p.custo?' • Custo: '+fmtV(p.custo):''}</div>
+          <div class="epcat">${catNome[p.cat]||p.cat} ${precos.length?'• '+precos.join(' • '):''}${p.custo?' • Custo: '+fmtV(p.custo):''}</div>
         </div>
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
           <span style="font-size:12px;color:var(--tx2)">${p.tamanhos.reduce((a,t)=>a+t.qtd,0)} un.</span>
@@ -1271,7 +1327,8 @@ function abrirEdProd(pi){
   const p=db.produtos[pi];
   document.getElementById('ep-id').value=pi;
   document.getElementById('ep-nome').value=p.nome;
-  document.getElementById('ep-preco').value=p.preco||'';
+  document.getElementById('ep-preco-vista').value=p.precoVista||p.preco||'';
+  document.getElementById('ep-preco-prazo').value=p.precoPrazo||'';
   document.getElementById('ep-custo').value=p.custo||'';
   document.getElementById('ep-cat').value=p.cat||'outro';
   om('m-prod');
@@ -1281,7 +1338,9 @@ async function saveEdicaoProd(){
   const nome=document.getElementById('ep-nome').value.trim();
   if(!nome){alert('Nome obrigatório.');return;}
   db.produtos[pi].nome=nome;
-  db.produtos[pi].preco=parseFloat(document.getElementById('ep-preco').value)||0;
+  db.produtos[pi].precoVista=parseFloat(document.getElementById('ep-preco-vista').value)||0;
+  db.produtos[pi].precoPrazo=parseFloat(document.getElementById('ep-preco-prazo').value)||0;
+  db.produtos[pi].preco=db.produtos[pi].precoVista||db.produtos[pi].precoPrazo||0;
   db.produtos[pi].custo=parseFloat(document.getElementById('ep-custo').value)||0;
   db.produtos[pi].cat=document.getElementById('ep-cat').value;
   await saveProduto(db.produtos[pi]);
@@ -1323,11 +1382,15 @@ function renderCaixa(){
   const sai=db.caixa.filter(m=>m.tipo==='saida'&&m.valor>0).reduce((a,m)=>a+m.valor,0);
   const saldo=ent-sai;
   const mesSaldo=db.caixa.filter(m=>m.data&&m.data.slice(0,7)===mes&&m.valor>0).reduce((a,m)=>a+(m.tipo==='entrada'?m.valor:-m.valor),0);
+  const recVista=db.caixa.filter(m=>m.cat==='venda'&&m.valor>0).reduce((a,m)=>a+m.valor,0);
+  const recParcelas=db.caixa.filter(m=>m.cat==='parcela'&&m.valor>0).reduce((a,m)=>a+m.valor,0);
   document.getElementById('cx-met').innerHTML=`
-    <div class="met g"><div class="mval">${fmtV(ent)}</div><div class="mlbl">Entradas</div></div>
-    <div class="met r"><div class="mval">${fmtV(sai)}</div><div class="mlbl">Saídas</div></div>
+    <div class="met g"><div class="mval">${fmtV(ent)}</div><div class="mlbl">Total entradas</div></div>
+    <div class="met r"><div class="mval">${fmtV(sai)}</div><div class="mlbl">Total saídas</div></div>
     <div class="met t"><div class="mval" style="color:${saldo>=0?'var(--gr)':'var(--rd)'}">${fmtV(saldo)}</div><div class="mlbl">Saldo total</div></div>
-    <div class="met"><div class="mval" style="color:${mesSaldo>=0?'var(--tl)':'var(--rd)'}">${fmtV(mesSaldo)}</div><div class="mlbl">Saldo do mês</div></div>`;
+    <div class="met"><div class="mval" style="color:${mesSaldo>=0?'var(--tl)':'var(--rd)'}">${fmtV(mesSaldo)}</div><div class="mlbl">Saldo do mês</div></div>
+    <div class="met p"><div class="mval">${fmtV(recVista)}</div><div class="mlbl">💵 Recebido à vista</div></div>
+    <div class="met"><div class="mval" style="color:var(--tl)">${fmtV(recParcelas)}</div><div class="mlbl">💳 Parcelas recebidas</div></div>`;
   if(!lista.length){document.getElementById('cx-lista').innerHTML='<div class="empty">Nenhuma movimentação.</div>';return;}
   const catL={venda:'Venda',parcela:'Parcela',estoque:'Estoque',fornecedor:'Fornecedor',aluguel:'Aluguel',outros:'Outros'};
   document.getElementById('cx-lista').innerHTML=lista.map(m=>{
