@@ -41,7 +41,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--tx);min-h
 
 /* ══ AUTH ══ */
 #auth-screen{display:none;position:fixed;inset:0;background:#1A0D12;z-index:900;align-items:center;justify-content:center;padding:1.5rem;overflow-y:auto}
-#auth-screen.on{display:flex}
+#auth-screen.on{display:flex!important}
 .auth-box{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:var(--rx);padding:2rem;width:100%;max-width:380px}
 .auth-logo{font-size:36px;text-align:center;margin-bottom:.5rem}
 .auth-title{font-size:20px;font-weight:700;color:#fff;text-align:center;letter-spacing:-.02em;margin-bottom:.25rem}
@@ -539,8 +539,13 @@ function syncing(on){document.getElementById('syncing').classList.toggle('on',on
 // ══════════════════════════════════════
 function entrar(){
   const sp=document.getElementById('splash');
-  sp.classList.add('hide');
-  setTimeout(()=>{sp.style.display='none';document.getElementById('auth-screen').classList.add('on');},500);
+  sp.style.opacity='0';
+  sp.style.pointerEvents='none';
+  setTimeout(()=>{
+    sp.style.display='none';
+    document.getElementById('auth-screen').style.display='flex';
+    document.getElementById('auth-screen').classList.add('on');
+  },400);
 }
 
 // ══════════════════════════════════════
