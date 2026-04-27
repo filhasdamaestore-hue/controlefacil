@@ -182,9 +182,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--tx);min-h
 .auth-title{font-size:20px;font-weight:700;color:#fff;text-align:center;letter-spacing:-.02em;margin-bottom:.25rem}
 .auth-title span{color:var(--pk2)}
 .auth-sub{font-size:13px;color:rgba(255,255,255,.4);text-align:center;margin-bottom:1.75rem}
-.auth-tabs{display:flex;gap:4px;background:rgba(255,255,255,.05);border-radius:8px;padding:3px;margin-bottom:1.5rem}
-.auth-tab{flex:1;padding:8px;font-size:13px;font-weight:500;font-family:'DM Sans',sans-serif;cursor:pointer;border:none;background:none;color:rgba(255,255,255,.4);border-radius:6px;transition:all .15s;text-align:center}
-.auth-tab.on{background:var(--pk);color:#fff}
 .auth-label{font-size:12px;font-weight:500;color:rgba(255,255,255,.5);text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:5px;margin-top:12px}
 .auth-input{width:100%;border:1px solid rgba(255,255,255,.12);border-radius:var(--r);padding:11px 14px;font-size:14px;font-family:'DM Sans',sans-serif;color:#fff;background:rgba(255,255,255,.07);outline:none;transition:border-color .15s}
 .auth-input:focus{border-color:var(--pk2)}
@@ -373,30 +370,15 @@ textarea{resize:vertical;min-height:80px}
     <div class="auth-logo">🛍️</div>
     <div class="auth-title">Controle<span>Fácil</span></div>
     <div class="auth-sub">Gestão simples para sua loja</div>
-    <div class="auth-tabs">
-      <button class="auth-tab on" data-tab="login">Entrar</button>
-      <button class="auth-tab" data-tab="signup">Criar conta</button>
-    </div>
     <div id="auth-login">
       <label class="auth-label">E-mail</label>
       <input class="auth-input" id="login-email" type="email" placeholder="seu@email.com">
       <label class="auth-label">Senha</label>
       <input class="auth-input" id="login-senha" type="password" placeholder="Sua senha">
-      <button class="auth-btn" onclick="fazerLogin()" id="btn-login">Entrar</button>
+      <button class="auth-btn" id="btn-login">Entrar</button>
       <div style="text-align:center;margin-top:10px">
         <span style="font-size:12px;color:rgba(255,255,255,.3);cursor:pointer;text-decoration:underline" id="btn-esqueceu">Esqueci minha senha</span>
       </div>
-    </div>
-    <div id="auth-signup" style="display:none">
-      <label class="auth-label">Nome da loja</label>
-      <input class="auth-input" id="signup-loja" type="text" placeholder="Ex: Boutique da Maria">
-      <label class="auth-label">E-mail</label>
-      <input class="auth-input" id="signup-email" type="email" placeholder="seu@email.com">
-      <label class="auth-label">Senha</label>
-      <input class="auth-input" id="signup-senha" type="password" placeholder="Mínimo 6 caracteres">
-      <label class="auth-label">Confirmar senha</label>
-      <input class="auth-input" id="signup-confirm" type="password" placeholder="Repita a senha">
-      <button class="auth-btn" onclick="criarConta()" id="btn-signup">Criar conta grátis</button>
     </div>
     <div class="auth-error" id="auth-error"></div>
   </div>
@@ -666,35 +648,11 @@ function entrar(){
 }
 
 document.addEventListener('DOMContentLoaded',function(){
-  // login
   document.getElementById('btn-login').addEventListener('click', fazerLogin);
-  document.getElementById('btn-signup').addEventListener('click', criarConta);
-
-  // esqueceu senha
   const esq=document.getElementById('btn-esqueceu');
   if(esq) esq.addEventListener('click', esqueceuSenha);
-
-  // auth tabs
-  document.querySelectorAll('.auth-tab').forEach(function(tab){
-    tab.addEventListener('click', function(){
-      const t=this.dataset.tab;
-      document.querySelectorAll('.auth-tab').forEach(b=>b.classList.remove('on'));
-      this.classList.add('on');
-      document.getElementById('auth-login').style.display=t==='login'?'block':'none';
-      document.getElementById('auth-signup').style.display=t==='signup'?'block':'none';
-      document.getElementById('auth-error').textContent='';
-    });
-  });
-
-  // enter key
   document.addEventListener('keydown',function(e){
-    if(e.key==='Enter'){
-      const as=document.getElementById('auth-screen');
-      if(!as.classList.contains('hide')){
-        const loginVisible=document.getElementById('auth-login').style.display!=='none';
-        if(loginVisible) fazerLogin(); else criarConta();
-      }
-    }
+    if(e.key==='Enter') fazerLogin();
   });
 });
 
