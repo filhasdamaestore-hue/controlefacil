@@ -1064,8 +1064,14 @@ async function salvarVenda(){
   const c={nome,nasc,tel,valor,parc,valParc,produto:prod,itens:[...carrinho],parcelas,criado:new Date().toISOString()};
   await saveCliente(c);
   db.clientes.unshift(c);
+  // Lança no caixa como venda (entrada)
   const m={tipo:'entrada',valor,desc:`Venda: ${prod} (${nome})`,data:today(),cat:'venda'};
   await saveMov(m);db.caixa.unshift(m);
+  // Se for à vista (1x), já marca a parcela como paga automaticamente — sem lançar de novo no caixa
+  if(parc===1){
+    db.clientes[0].parcelas[0].pago=true;
+    await saveCliente(db.clientes[0]);
+  }
   loading(false);
   ['f-nome','f-nasc','f-tel','f-valor','f-datapag'].forEach(id=>document.getElementById(id).value='');
   carrinho=[];pickProd=null;pickTam=null;
@@ -1132,8 +1138,12 @@ async function togglePago(ci,pi){
   const c=db.clientes[ci],p=c.parcelas[pi];
   await saveCliente(c);
   if(p.pago){
-    const m={tipo:'entrada',valor:c.valParc,desc:`Parcela ${pi+1}/${c.parc} - ${c.nome}`,data:today(),cat:'parcela'};
-    await saveMov(m);db.caixa.unshift(m);
+    // Só lança no caixa se for parcelado (mais de 1x)
+    // Venda à vista já foi lançada no momento da venda
+    if(c.parc>1){
+      const m={tipo:'entrada',valor:c.valParc,desc:`Parcela ${pi+1}/${c.parc} - ${c.nome}`,data:today(),cat:'parcela'};
+      await saveMov(m);db.caixa.unshift(m);
+    }
   }
   renderCli();
 }
@@ -1226,8 +1236,10 @@ async function pagoHoje(ci,pi){
   db.clientes[ci].parcelas[pi].pago=true;
   const c=db.clientes[ci];
   await saveCliente(c);
-  const m={tipo:'entrada',valor:c.valParc,desc:`Parcela ${pi+1}/${c.parc} - ${c.nome}`,data:today(),cat:'parcela'};
-  await saveMov(m);db.caixa.unshift(m);
+  if(c.parc>1){
+    const m={tipo:'entrada',valor:c.valParc,desc:`Parcela ${pi+1}/${c.parc} - ${c.nome}`,data:today(),cat:'parcela'};
+    await saveMov(m);db.caixa.unshift(m);
+  }
   renderHoje();
 }
 
@@ -1339,6 +1351,7 @@ async function ajQtd(pi,ti,delta){
   t.qtd=nova;
   await saveProduto(db.produtos[pi]);
   renderEst();renderPicker();
+  // Não lança no caixa — ajuste de quantidade é só controle de estoque
 }
 async function delTam(pi,ti){
   if(!confirm(`Excluir tamanho ${db.produtos[pi].tamanhos[ti].tam}?`))return;
