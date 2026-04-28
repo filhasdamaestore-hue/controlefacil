@@ -1308,7 +1308,7 @@ function renderHoje(){
         <div><div class="cnome">${esc(c.nome)}</div><div class="csub">${esc(c.tel||'Sem telefone')} • Parcela ${pi+1}/${c.parc}</div></div>
         <div style="font-size:18px;font-weight:700">${fmtV(c.valParc)}</div>
       </div>
-      <div class="msgbox">${esc(msg)}</div>
+      <div class="msgbox" style="white-space:pre-line">${msg.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
       <div class="hacts">
         ${wl?`<a href="${wl}" target="_blank" style="flex:1"><button class="bwa" style="width:100%;padding:10px">📲 Abrir no WhatsApp</button></a>`:''}
         <button class="bsec" onclick="copiar(${ci},${pi})">Copiar mensagem</button>
