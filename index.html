@@ -357,6 +357,21 @@ textarea{resize:vertical;min-height:80px}
 .macts button{flex:1;padding:10px;font-size:14px;font-weight:500;font-family:'DM Sans',sans-serif;border-radius:var(--r);cursor:pointer;border:1px solid var(--bdr2);background:var(--sur2);color:var(--tx)}
 .macts .sv{background:var(--pk);color:#fff;border-color:var(--pk)}
 
+/* ══ NOTIFICAÇÕES ══ */
+.notif-card{background:#fff;border-left:4px solid var(--pk);border-radius:var(--r);padding:12px 14px;margin-bottom:8px;display:flex;align-items:flex-start;justify-content:space-between;gap:10px;box-shadow:0 2px 8px rgba(214,0,92,.1)}
+.notif-card.urgente{border-color:var(--rd);background:#FFF5F5}
+.notif-card.amanha{border-color:var(--am)}
+.notif-info{flex:1}
+.notif-titulo{font-size:13px;font-weight:600;color:var(--tx)}
+.notif-sub{font-size:12px;color:var(--tx2);margin-top:2px}
+.notif-badge{font-size:11px;font-weight:700;padding:3px 8px;border-radius:20px;white-space:nowrap;flex-shrink:0}
+.notif-badge.hoje{background:var(--rd-bg);color:var(--rd)}
+.notif-badge.amanha{background:var(--am-bg);color:var(--am)}
+.notif-badge.em3{background:var(--pk-bg);color:var(--pk)}
+.notif-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.notif-title-bar{font-size:13px;font-weight:600;color:var(--tx2)}
+.notif-fechar{background:none;border:none;font-size:18px;cursor:pointer;color:var(--tx3);padding:0 4px}
+
 @media(max-width:540px){
   .r2,.r3{grid-template-columns:1fr}
   .mg3,.mg4{grid-template-columns:1fr 1fr}
@@ -400,6 +415,10 @@ textarea{resize:vertical;min-height:80px}
 
 <div class="wrap" id="app-wrap" style="display:none">
   <div class="syncing" id="syncing">☁️ Sincronizando...</div>
+
+  <!-- CAIXINHA DE NOTIFICAÇÕES -->
+  <div id="notif-banner" style="display:none;margin-bottom:1rem"></div>
+
   <div class="tabs">
     <button class="tab on"  onclick="go('nova')">Nova venda</button>
     <button class="tab"     onclick="go('clientes')">Clientes</button>
@@ -576,6 +595,23 @@ textarea{resize:vertical;min-height:80px}
       <div class="ctitle">👤 Minha conta</div>
       <div id="user-email-display" style="font-size:13px;color:var(--tx2);margin-bottom:1rem"></div>
       <button class="bsec" style="width:100%;padding:10px;color:var(--rd);border-color:#FECACA" onclick="sair()">Sair da conta</button>
+    </div>
+
+    <div class="card" style="border-color:#FF1A75;background:linear-gradient(135deg,#fff 80%,#FFE8F2)">
+      <div class="ctitle">💳 Mensalidade do ControleFácil</div>
+      <p style="font-size:13px;color:var(--tx2);margin-bottom:1rem;line-height:1.6">Configure aqui o valor e vencimento da sua mensalidade. Você receberá um aviso <strong>3 dias antes</strong> do vencimento.</p>
+      <div class="r2">
+        <div class="fg"><label class="fl">Valor da mensalidade (R$)</label><input id="mens-valor" type="number" placeholder="Ex: 39,90" step="0.01" min="0"></div>
+        <div class="fg"><label class="fl">Dia do vencimento</label>
+          <select id="mens-dia">
+            <option value="">Selecione...</option>
+            ${Array.from({length:28},(_,i)=>`<option value="${i+1}">Dia ${i+1}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="fg"><label class="fl">Chave Pix para pagamento (sua chave)</label><input id="mens-pix" type="text" placeholder="Pix que a loja deve pagar a você"></div>
+      <button class="bprim" style="background:var(--pk)" onclick="salvarMensalidade()">Salvar mensalidade</button>
+      <div id="mens-status" style="font-size:12px;color:var(--tx2);margin-top:10px;text-align:center"></div>
     </div>
   </div>
 </div>
@@ -797,7 +833,11 @@ async function carregarDados(){
     db.clientes=(Array.isArray(jCli)?jCli:[]).map(r=>({...r.dados,id:r.id,_rid:r.id}));
     db.produtos=(Array.isArray(jProd)?jProd:[]).map(r=>({...r.dados,id:r.id,_rid:r.id}));
     db.caixa=(Array.isArray(jCaixa)?jCaixa:[]).map(r=>({...r.dados,id:r.id,_rid:r.id}));
-    if(Array.isArray(jCfg)&&jCfg[0])db.config=jCfg[0].dados||db.config;
+    if(Array.isArray(jCfg)&&jCfg[0]){
+      db.config=jCfg[0].dados||db.config;
+      // Carrega mensalidade que você configura direto no Supabase
+      if(jCfg[0].mensalidade) db.config.mensalidade=jCfg[0].mensalidade;
+    }
   }catch(e){console.log('Erro ao carregar:',e);}
   loading(false);
   iniciarApp();
@@ -907,6 +947,126 @@ function iniciarApp(){
   document.getElementById('cx-data').value=today();
   updatePrev();
   renderPicker();
+  verificarNotificacoes();
+}
+
+// ══════════════════════════════════════
+// NOTIFICAÇÕES + MENSALIDADE
+// ══════════════════════════════════════
+function verificarNotificacoes(){
+  const banner=document.getElementById('notif-banner');
+  let html='';
+
+  // ── Aviso de mensalidade ──
+  const mens=db.config.mensalidade||{};
+  if(mens.dia&&mens.valor){
+    const hoje=new Date();
+    const diaVenc=parseInt(mens.dia);
+    let venc=new Date(hoje.getFullYear(),hoje.getMonth(),diaVenc);
+    if(venc<hoje) venc.setMonth(venc.getMonth()+1);
+    const diff=Math.ceil((venc-hoje)/(1000*60*60*24));
+
+    if(diff<=3){
+      const valorFmt='R$ '+Number(mens.valor).toFixed(2).replace('.',',');
+      const pix=mens.pix||'(não configurado)';
+      let diasTexto='';
+      if(diff<=0) diasTexto='HOJE';
+      else if(diff===1) diasTexto='AMANHÃ';
+      else diasTexto=`em ${diff} dias (dia ${mens.dia})`;
+
+      // Não mostrar se já fechou hoje
+      const fechou=localStorage.getItem('mens_fechada');
+      if(fechou!==today()){
+        html+=`<div style="background:#1A0D12;border-radius:var(--r);padding:14px 16px;margin-bottom:8px;border:2px solid var(--pk)">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+            <div style="flex:1">
+              <div style="font-size:14px;font-weight:700;color:#fff;margin-bottom:6px">🔔 Mensalidade vence ${diasTexto}!</div>
+              <div style="font-size:13px;color:rgba(255,255,255,.8);line-height:1.6">
+                Olá! Sua mensalidade do <strong style="color:var(--pk2)">ControleFácil</strong> vence ${diasTexto}.<br>
+                Valor: <strong style="color:#fff">${valorFmt}</strong> — Pague via Pix: <strong style="color:var(--pk2)">${esc(pix)}</strong><br>
+                Dúvidas? Ligue: <strong style="color:#fff">(18) 99185-2092</strong>
+              </div>
+            </div>
+            <button onclick="fecharMensalidade()" style="background:rgba(255,255,255,.15);border:none;border-radius:6px;color:#fff;cursor:pointer;padding:4px 10px;font-size:18px;flex-shrink:0">✕</button>
+          </div>
+        </div>`;
+      }
+    }
+  }
+
+  // ── Avisos de cobranças de clientes ──
+  const hoje=today();
+  const em3=new Date();em3.setDate(em3.getDate()+3);
+  const d3=em3.toISOString().split('T')[0];
+  const alertas=[];
+  db.clientes.forEach(c=>{
+    c.parcelas.forEach((p,pi)=>{
+      if(p.pago)return;
+      if(p.data===hoje) alertas.push({tipo:'hoje',nome:c.nome,parc:`${pi+1}/${c.parc}`,valor:c.valParc,data:fmtD(p.data)});
+      else if(p.data>hoje&&p.data<=d3) alertas.push({tipo:'em3',nome:c.nome,parc:`${pi+1}/${c.parc}`,valor:c.valParc,data:fmtD(p.data)});
+    });
+  });
+
+  if(alertas.length&&localStorage.getItem('notif_fechada')!==today()){
+    const labels={hoje:'HOJE',em3:'EM 3 DIAS'};
+    const cores={hoje:'var(--rd)',em3:'var(--pk)'};
+    html+=`<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:12px 14px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-size:13px;font-weight:600;color:var(--tx)">🔔 ${alertas.length} cobrança(s) próxima(s)</span>
+        <button onclick="fecharNotif()" style="background:none;border:none;font-size:16px;cursor:pointer;color:var(--tx3)">✕</button>
+      </div>
+      ${alertas.map(a=>`
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--bdr);font-size:13px">
+          <span style="color:var(--tx2)">${esc(a.nome)} • Parcela ${a.parc}</span>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-weight:600">${fmtV(a.valor)}</span>
+            <span style="background:${cores[a.tipo]};color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px">${labels[a.tipo]}</span>
+          </div>
+        </div>`).join('')}
+    </div>`;
+    solicitarNotificacao(alertas);
+  }
+
+  if(html){
+    banner.style.display='block';
+    banner.innerHTML=html;
+  }else{
+    banner.style.display='none';
+  }
+}
+
+function fecharNotif(){
+  localStorage.setItem('notif_fechada',today());
+  verificarNotificacoes();
+}
+
+function fecharMensalidade(){
+  localStorage.setItem('mens_fechada',today());
+  verificarNotificacoes();
+}
+
+async function solicitarNotificacao(alertas){
+  if(!('Notification' in window))return;
+  // Não mostra de novo se já fechou hoje
+  if(localStorage.getItem('notif_fechada')===today())return;
+  if(Notification.permission==='default'){
+    await Notification.requestPermission();
+  }
+  if(Notification.permission==='granted'){
+    const hoje=alertas.filter(a=>a.tipo==='hoje');
+    const prox=alertas.filter(a=>a.tipo!=='hoje');
+    if(hoje.length){
+      new Notification('ControleFácil — Cobranças de hoje 🔔',{
+        body:`${hoje.length} pagamento(s) vencem HOJE!\n${hoje.map(a=>`• ${a.nome} — ${fmtV(a.valor)}`).join('\n')}`,
+        icon:'https://controlefacil-phi.vercel.app/favicon.ico'
+      });
+    } else if(prox.length){
+      new Notification('ControleFácil — Lembretes 🔔',{
+        body:`${prox.length} pagamento(s) chegando:\n${prox.map(a=>`• ${a.nome} — ${fmtV(a.valor)} (${a.data})`).join('\n')}`,
+        icon:'https://controlefacil-phi.vercel.app/favicon.ico'
+      });
+    }
+  }
 }
 
 // ══════════════════════════════════════
@@ -918,7 +1078,7 @@ function go(t){
   document.querySelectorAll('.sec').forEach(s=>s.classList.remove('on'));
   document.querySelectorAll('.tab')[TABS.indexOf(t)].classList.add('on');
   document.getElementById('s-'+t).classList.add('on');
-  if(t==='clientes')renderCli();
+  if(t==='clientes'){renderCli();verificarNotificacoes();}
   if(t==='hoje')renderHoje();
   if(t==='estoque')renderEst();
   if(t==='caixa')renderCaixa();
@@ -942,7 +1102,7 @@ function buildMsg(c,val,num,tot,ds){
   const loja=db.config.loja||'ControleFácil';
   const pix=db.config.pix||'(chave pix não configurada)';
   const msg=db.config.msg||'Obrigada pela sua confiança!';
-  return`Olá, ${c.nome}! 👋\n\nPassando para lembrar que hoje, ${ds}, vence a parcela ${num}/${tot} da sua compra.\n\n🛍️ Produto: ${c.produto}\n💰 Valor: ${fmtV(val)}\n\n💳 Pague via Pix:\n${pix}\n\n${msg}\n\n— ${loja}`;
+  return`Olá, ${c.nome}! 👋\n\nPassando para lembrar que hoje, ${ds}, vence a parcela ${num}/${tot} da sua compra.\n\nProduto: ${c.produto}\nValor: ${fmtV(val)}\n\nPague via Pix:\n${pix}\n\n${msg}\n\n— ${loja}`;
 }
 function waLink(tel,msg){return`https://wa.me/55${tel.replace(/\D/g,'')}?text=${encodeURIComponent(msg)}`;}
 
