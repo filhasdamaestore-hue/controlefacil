@@ -520,7 +520,7 @@ textarea{resize:vertical;min-height:80px}
 
   <!-- CAIXA -->
   <div class="sec" id="s-caixa">
-    <div class="mg4" id="cx-met" style="grid-template-columns:repeat(3,1fr)"></div>
+    <div class="mg4" id="cx-met" style="grid-template-columns:repeat(auto-fill,minmax(160px,1fr))"></div>
     <div class="card" style="margin-bottom:1rem">
       <div class="ctitle">Registrar movimentação</div>
       <div class="r2">
@@ -586,15 +586,42 @@ textarea{resize:vertical;min-height:80px}
     <button class="mclose" onclick="cm('m-cli')">✕</button>
     <div class="mtitle">Editar cliente</div>
     <input type="hidden" id="ec-id">
+
+    <div class="slbl" style="margin-top:0">Dados pessoais</div>
     <div class="r2">
       <div class="fg"><label class="fl">Nome</label><input id="ec-nome" type="text"></div>
       <div class="fg"><label class="fl">Data nasc.</label><input id="ec-nasc" type="date"></div>
     </div>
     <div class="fg"><label class="fl">WhatsApp</label><input id="ec-tel" type="tel"></div>
-    <div class="fg"><label class="fl">Produto</label><input id="ec-prod" type="text"></div>
+
+    <div class="slbl">Produto / itens</div>
+    <div class="fg"><label class="fl">Descrição do produto</label><input id="ec-prod" type="text" placeholder="Ex: Conjunto Canelado Tam.G"></div>
+
+    <div class="slbl">Valores</div>
+    <div class="r2">
+      <div class="fg"><label class="fl">Valor total (R$)</label><input id="ec-valor" type="number" step="0.01" min="0"></div>
+      <div class="fg"><label class="fl">Nº de parcelas</label>
+        <select id="ec-parc">
+          <option value="1">1x (à vista)</option><option value="2">2x</option><option value="3">3x</option>
+          <option value="4">4x</option><option value="5">5x</option><option value="6">6x</option>
+          <option value="8">8x</option><option value="10">10x</option><option value="12">12x</option>
+        </select>
+      </div>
+    </div>
+    <div class="fg"><label class="fl">Data do 1º pagamento</label><input id="ec-datapag" type="date"></div>
+
+    <div id="ec-parcelas-wrap" style="margin-top:8px">
+      <div style="font-size:12px;color:var(--tx3);margin-bottom:6px">Status atual das parcelas (marque as já pagas):</div>
+      <div id="ec-parcelas-list"></div>
+    </div>
+
+    <div style="background:var(--sur2);border-radius:var(--r);padding:10px;font-size:12px;color:var(--tx2);margin-top:10px">
+      ⚠️ Alterar valor ou parcelas vai <strong>recalcular</strong> as datas. Parcelas já marcadas como pagas serão mantidas.
+    </div>
+
     <div class="macts">
       <button onclick="cm('m-cli')">Cancelar</button>
-      <button class="sv" onclick="saveEdicaoCli()">Salvar</button>
+      <button class="sv" onclick="saveEdicaoCli()">Salvar alterações</button>
     </div>
   </div>
 </div>
@@ -1148,9 +1175,21 @@ async function togglePago(ci,pi){
   renderCli();
 }
 async function delCli(ci){
-  if(!confirm(`Excluir ${db.clientes[ci].nome}?`))return;
-  await deletarCliente(db.clientes[ci]._rid);
-  db.clientes.splice(ci,1);renderCli();
+  const c=db.clientes[ci];
+  if(!confirm(`Excluir ${c.nome}?\n\nIsso vai devolver os itens ao estoque automaticamente.`))return;
+  // Devolver itens ao estoque
+  if(c.itens&&c.itens.length){
+    for(const item of c.itens){
+      if(item.prodIdx!==null&&item.tamIdx!==null&&db.produtos[item.prodIdx]){
+        const t=db.produtos[item.prodIdx].tamanhos[item.tamIdx];
+        if(t){t.qtd++;await saveProduto(db.produtos[item.prodIdx]);}
+      }
+    }
+  }
+  await deletarCliente(c._rid);
+  db.clientes.splice(ci,1);
+  renderCli();renderPicker();
+  alert('Cliente excluído e estoque restaurado!');
 }
 function abrirEdicaoCli(ci){
   const c=db.clientes[ci];
@@ -1159,17 +1198,69 @@ function abrirEdicaoCli(ci){
   document.getElementById('ec-nasc').value=c.nasc||'';
   document.getElementById('ec-tel').value=c.tel||'';
   document.getElementById('ec-prod').value=c.produto;
+  document.getElementById('ec-valor').value=c.valor;
+  document.getElementById('ec-parc').value=c.parc;
+  document.getElementById('ec-datapag').value=c.parcelas[0]?.data||'';
+  renderEcParcelas(ci);
   om('m-cli');
 }
+
+function renderEcParcelas(ci){
+  const c=db.clientes[ci];
+  document.getElementById('ec-parcelas-list').innerHTML=c.parcelas.map((p,pi)=>`
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--bdr);gap:8px">
+      <span style="font-size:13px;color:var(--tx2)">Parcela ${pi+1}/${c.parc} — ${fmtD(p.data)}</span>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:13px;font-weight:600">${fmtV(c.valParc)}</span>
+        <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer">
+          <input type="checkbox" id="ecp-${pi}" ${p.pago?'checked':''} style="width:auto">
+          Pago
+        </label>
+      </div>
+    </div>`).join('');
+}
+
 async function saveEdicaoCli(){
   const ci=parseInt(document.getElementById('ec-id').value);
   const nome=document.getElementById('ec-nome').value.trim();
   const prod=document.getElementById('ec-prod').value.trim();
-  if(!nome||!prod){alert('Nome e produto obrigatórios.');return;}
-  db.clientes[ci].nome=nome;db.clientes[ci].nasc=document.getElementById('ec-nasc').value;
-  db.clientes[ci].tel=document.getElementById('ec-tel').value.trim();db.clientes[ci].produto=prod;
-  await saveCliente(db.clientes[ci]);
-  cm('m-cli');renderCli();
+  const valor=parseFloat(document.getElementById('ec-valor').value)||0;
+  const parc=parseInt(document.getElementById('ec-parc').value);
+  const datapag=document.getElementById('ec-datapag').value;
+  if(!nome||!prod){alert('Nome e produto são obrigatórios.');return;}
+
+  const c=db.clientes[ci];
+  c.nome=nome;
+  c.nasc=document.getElementById('ec-nasc').value;
+  c.tel=document.getElementById('ec-tel').value.trim();
+  c.produto=prod;
+
+  // Se valor ou parcelas mudaram, recalcula
+  if(valor!==c.valor||parc!==c.parc||datapag!==c.parcelas[0]?.data){
+    c.valor=valor;
+    c.parc=parc;
+    c.valParc=valor/parc;
+    // recalcula parcelas mantendo status de pago
+    const base=new Date(datapag+'T12:00:00');
+    c.parcelas=[];
+    for(let i=0;i<parc;i++){
+      const d=new Date(base);d.setMonth(d.getMonth()+i);
+      // tenta manter o status pago da parcela anterior
+      const foiPago=document.getElementById(`ecp-${i}`)?.checked||false;
+      c.parcelas.push({data:d.toISOString().split('T')[0],pago:foiPago});
+    }
+  }else{
+    // só atualiza o status pago de cada parcela
+    c.parcelas.forEach((p,pi)=>{
+      const cb=document.getElementById(`ecp-${pi}`);
+      if(cb)p.pago=cb.checked;
+    });
+  }
+
+  await saveCliente(c);
+  cm('m-cli');
+  renderCli();
+  alert('✅ Cliente atualizado com sucesso!');
 }
 function abrirExtrato(ci){
   const c=db.clientes[ci];
@@ -1427,15 +1518,20 @@ function renderCaixa(){
   const sai=db.caixa.filter(m=>m.tipo==='saida'&&m.valor>0).reduce((a,m)=>a+m.valor,0);
   const saldo=ent-sai;
   const mesSaldo=db.caixa.filter(m=>m.data&&m.data.slice(0,7)===mes&&m.valor>0).reduce((a,m)=>a+(m.tipo==='entrada'?m.valor:-m.valor),0);
-  const recVista=db.caixa.filter(m=>m.cat==='venda'&&m.valor>0).reduce((a,m)=>a+m.valor,0);
-  const recParcelas=db.caixa.filter(m=>m.cat==='parcela'&&m.valor>0).reduce((a,m)=>a+m.valor,0);
+  // Recebido à vista = clientes com 1 parcela já paga
+  const recVista=db.clientes.filter(c=>c.parc===1&&c.parcelas[0]?.pago).reduce((a,c)=>a+c.valor,0);
+  // Parcelas recebidas = parcelas pagas de clientes parcelados
+  const recParcelas=db.clientes.filter(c=>c.parc>1).reduce((a,c)=>a+c.parcelas.filter(p=>p.pago).length*c.valParc,0);
+  // A receber = parcelas pendentes
+  const aReceber=db.clientes.reduce((a,c)=>a+c.parcelas.filter(p=>!p.pago).length*c.valParc,0);
   document.getElementById('cx-met').innerHTML=`
     <div class="met g"><div class="mval">${fmtV(ent)}</div><div class="mlbl">Total entradas</div></div>
     <div class="met r"><div class="mval">${fmtV(sai)}</div><div class="mlbl">Total saídas</div></div>
     <div class="met t"><div class="mval" style="color:${saldo>=0?'var(--gr)':'var(--rd)'}">${fmtV(saldo)}</div><div class="mlbl">Saldo total</div></div>
     <div class="met"><div class="mval" style="color:${mesSaldo>=0?'var(--tl)':'var(--rd)'}">${fmtV(mesSaldo)}</div><div class="mlbl">Saldo do mês</div></div>
     <div class="met p"><div class="mval">${fmtV(recVista)}</div><div class="mlbl">💵 Recebido à vista</div></div>
-    <div class="met"><div class="mval" style="color:var(--tl)">${fmtV(recParcelas)}</div><div class="mlbl">💳 Parcelas recebidas</div></div>`;
+    <div class="met"><div class="mval" style="color:var(--tl)">${fmtV(recParcelas)}</div><div class="mlbl">💳 Parcelas recebidas</div></div>
+    <div class="met o"><div class="mval" style="color:var(--am)">${fmtV(aReceber)}</div><div class="mlbl">⏳ A receber</div></div>`;
   if(!lista.length){document.getElementById('cx-lista').innerHTML='<div class="empty">Nenhuma movimentação.</div>';return;}
   const catL={venda:'Venda',parcela:'Parcela',estoque:'Estoque',fornecedor:'Fornecedor',aluguel:'Aluguel',outros:'Outros'};
   document.getElementById('cx-lista').innerHTML=lista.map(m=>{
