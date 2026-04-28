@@ -596,23 +596,6 @@ textarea{resize:vertical;min-height:80px}
       <div id="user-email-display" style="font-size:13px;color:var(--tx2);margin-bottom:1rem"></div>
       <button class="bsec" style="width:100%;padding:10px;color:var(--rd);border-color:#FECACA" onclick="sair()">Sair da conta</button>
     </div>
-
-    <div class="card" style="border-color:#FF1A75;background:linear-gradient(135deg,#fff 80%,#FFE8F2)">
-      <div class="ctitle">💳 Mensalidade do ControleFácil</div>
-      <p style="font-size:13px;color:var(--tx2);margin-bottom:1rem;line-height:1.6">Configure aqui o valor e vencimento da sua mensalidade. Você receberá um aviso <strong>3 dias antes</strong> do vencimento.</p>
-      <div class="r2">
-        <div class="fg"><label class="fl">Valor da mensalidade (R$)</label><input id="mens-valor" type="number" placeholder="Ex: 39,90" step="0.01" min="0"></div>
-        <div class="fg"><label class="fl">Dia do vencimento</label>
-          <select id="mens-dia">
-            <option value="">Selecione...</option>
-            ${Array.from({length:28},(_,i)=>`<option value="${i+1}">Dia ${i+1}</option>`).join('')}
-          </select>
-        </div>
-      </div>
-      <div class="fg"><label class="fl">Chave Pix para pagamento (sua chave)</label><input id="mens-pix" type="text" placeholder="Pix que a loja deve pagar a você"></div>
-      <button class="bprim" style="background:var(--pk)" onclick="salvarMensalidade()">Salvar mensalidade</button>
-      <div id="mens-status" style="font-size:12px;color:var(--tx2);margin-top:10px;text-align:center"></div>
-    </div>
   </div>
 </div>
 
