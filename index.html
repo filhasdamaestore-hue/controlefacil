@@ -758,16 +758,19 @@ async function carregarDados(){
   loading(true);
   const uid=_user.id;
   try{
+    const hdrs={'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':'Bearer '+_token};
+    const base=SUPA_URL+'/rest/v1';
     const[rCli,rProd,rCaixa,rCfg]=await Promise.all([
-      sb.from('clientes').select('*').eq('user_id',uid).order('criado',{ascending:false}).get(),
-      sb.from('produtos').select('*').eq('user_id',uid).order('criado',{ascending:true}).get(),
-      sb.from('caixa').select('*').eq('user_id',uid).order('data',{ascending:false}).get(),
-      sb.from('config').select('*').eq('user_id',uid).single().get()
+      fetchTimeout(`${base}/clientes?user_id=eq.${uid}&order=criado.desc&select=*`,{headers:hdrs}),
+      fetchTimeout(`${base}/produtos?user_id=eq.${uid}&order=criado.asc&select=*`,{headers:hdrs}),
+      fetchTimeout(`${base}/caixa?user_id=eq.${uid}&order=data.desc&select=*`,{headers:hdrs}),
+      fetchTimeout(`${base}/config?user_id=eq.${uid}&select=*`,{headers:hdrs})
     ]);
-    db.clientes=(rCli.data||[]).map(r=>({...r.dados,id:r.id,_rid:r.id}));
-    db.produtos=(rProd.data||[]).map(r=>({...r.dados,id:r.id,_rid:r.id}));
-    db.caixa=(rCaixa.data||[]).map(r=>({...r.dados,id:r.id,_rid:r.id}));
-    if(rCfg.data)db.config=rCfg.data.dados||db.config;
+    const [jCli,jProd,jCaixa,jCfg]=await Promise.all([rCli.json(),rProd.json(),rCaixa.json(),rCfg.json()]);
+    db.clientes=(Array.isArray(jCli)?jCli:[]).map(r=>({...r.dados,id:r.id,_rid:r.id}));
+    db.produtos=(Array.isArray(jProd)?jProd:[]).map(r=>({...r.dados,id:r.id,_rid:r.id}));
+    db.caixa=(Array.isArray(jCaixa)?jCaixa:[]).map(r=>({...r.dados,id:r.id,_rid:r.id}));
+    if(Array.isArray(jCfg)&&jCfg[0])db.config=jCfg[0].dados||db.config;
   }catch(e){console.log('Erro ao carregar:',e);}
   loading(false);
   iniciarApp();
@@ -776,58 +779,87 @@ async function carregarDados(){
 // ══════════════════════════════════════
 // SALVAR NA NUVEM
 // ══════════════════════════════════════
+function fetchTimeout(url,opts,ms=8000){
+  const ctrl=new AbortController();
+  const t=setTimeout(()=>ctrl.abort(),ms);
+  return fetch(url,{...opts,signal:ctrl.signal}).finally(()=>clearTimeout(t));
+}
+
+async function sbFetch(path,opts){
+  try{
+    const r=await fetchTimeout(SUPA_URL+path,{
+      ...opts,
+      headers:{'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':'Bearer '+(_token||''),'Prefer':'return=representation',...(opts.headers||{})}
+    });
+    if(r.status===204)return{data:null,error:null};
+    const j=await r.json().catch(()=>({}));
+    return r.ok?{data:Array.isArray(j)?j[0]:j,error:null}:{data:null,error:j};
+  }catch(e){
+    console.warn('Supabase fetch erro:',e.message);
+    return{data:null,error:e};
+  }
+}
+
 async function saveCliente(c){
   syncing(true);
-  const uid=_user.id;
-  if(c._rid){
-    await sb.from('clientes').update({dados:limpar(c),user_id:uid}).eq('id',c._rid);
-  }else{
-    const{data}=await sb.from('clientes').insert({dados:limpar(c),user_id:uid}).select().single();
-    if(data)c._rid=data.id;
-  }
+  try{
+    const uid=_user.id;
+    if(c._rid){
+      await sbFetch('/rest/v1/clientes?id=eq.'+c._rid,{method:'PATCH',body:JSON.stringify({dados:limpar(c),user_id:uid})});
+    }else{
+      const{data}=await sbFetch('/rest/v1/clientes',{method:'POST',body:JSON.stringify({dados:limpar(c),user_id:uid})});
+      if(data)c._rid=data.id;
+    }
+  }catch(e){console.warn('saveCliente:',e);}
   syncing(false);
 }
 async function deletarCliente(rid){
   syncing(true);
-  await sb.from('clientes').delete().eq('id',rid);
+  try{await sbFetch('/rest/v1/clientes?id=eq.'+rid,{method:'DELETE'});}catch(e){}
   syncing(false);
 }
 async function saveProduto(p){
   syncing(true);
-  const uid=_user.id;
-  if(p._rid){
-    await sb.from('produtos').update({dados:limpar(p),user_id:uid}).eq('id',p._rid);
-  }else{
-    const{data}=await sb.from('produtos').insert({dados:limpar(p),user_id:uid}).select().single();
-    if(data)p._rid=data.id;
-  }
+  try{
+    const uid=_user.id;
+    if(p._rid){
+      await sbFetch('/rest/v1/produtos?id=eq.'+p._rid,{method:'PATCH',body:JSON.stringify({dados:limpar(p),user_id:uid})});
+    }else{
+      const{data}=await sbFetch('/rest/v1/produtos',{method:'POST',body:JSON.stringify({dados:limpar(p),user_id:uid,criado:new Date().toISOString()})});
+      if(data)p._rid=data.id;
+    }
+  }catch(e){console.warn('saveProduto:',e);}
   syncing(false);
 }
 async function deletarProduto(rid){
   syncing(true);
-  await sb.from('produtos').delete().eq('id',rid);
+  try{await sbFetch('/rest/v1/produtos?id=eq.'+rid,{method:'DELETE'});}catch(e){}
   syncing(false);
 }
 async function saveMov(m){
   syncing(true);
-  const uid=_user.id;
-  if(m._rid){
-    await sb.from('caixa').update({dados:limpar(m),user_id:uid}).eq('id',m._rid);
-  }else{
-    const{data}=await sb.from('caixa').insert({dados:limpar(m),user_id:uid,data:m.data}).select().single();
-    if(data)m._rid=data.id;
-  }
+  try{
+    const uid=_user.id;
+    if(m._rid){
+      await sbFetch('/rest/v1/caixa?id=eq.'+m._rid,{method:'PATCH',body:JSON.stringify({dados:limpar(m),user_id:uid})});
+    }else{
+      const{data}=await sbFetch('/rest/v1/caixa',{method:'POST',body:JSON.stringify({dados:limpar(m),user_id:uid,data:m.data})});
+      if(data)m._rid=data.id;
+    }
+  }catch(e){console.warn('saveMov:',e);}
   syncing(false);
 }
 async function deletarMov(rid){
   syncing(true);
-  await sb.from('caixa').delete().eq('id',rid);
+  try{await sbFetch('/rest/v1/caixa?id=eq.'+rid,{method:'DELETE'});}catch(e){}
   syncing(false);
 }
 async function saveCfg(){
   syncing(true);
-  const uid=_user.id;
-  await sb.from('config').upsert({user_id:uid,dados:db.config},{onConflict:'user_id'});
+  try{
+    const uid=_user.id;
+    await sbFetch('/rest/v1/config?user_id=eq.'+uid,{method:'PATCH',body:JSON.stringify({dados:db.config})});
+  }catch(e){console.warn('saveCfg:',e);}
   syncing(false);
 }
 function limpar(obj){const o={...obj};delete o._rid;return o;}
