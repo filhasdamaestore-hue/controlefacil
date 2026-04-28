@@ -425,6 +425,7 @@ textarea{resize:vertical;min-height:80px}
     <button class="tab"     onclick="go('hoje')">Hoje</button>
     <button class="tab"     onclick="go('estoque')">Estoque</button>
     <button class="tab"     onclick="go('caixa')">Caixa</button>
+    <button class="tab"     onclick="go('relatorio')">Relatório</button>
     <button class="tab"     onclick="go('config')">Config.</button>
   </div>
 
@@ -433,11 +434,22 @@ textarea{resize:vertical;min-height:80px}
     <div class="card">
       <div class="ctitle">Registrar nova venda</div>
       <div class="slbl">Dados do cliente</div>
-      <div class="r2">
-        <div class="fg"><label class="fl">Nome completo</label><input id="f-nome" type="text" placeholder="Ex: Maria Silva"></div>
-        <div class="fg"><label class="fl">Data de nascimento</label><input id="f-nasc" type="date"></div>
+
+      <!-- Seletor de cliente existente -->
+      <div class="fg">
+        <label class="fl">Selecionar cliente existente</label>
+        <select id="f-cliente-sel" onchange="selecionarClienteExistente(this.value)">
+          <option value="">— Novo cliente —</option>
+        </select>
       </div>
-      <div class="fg"><label class="fl">WhatsApp</label><input id="f-tel" type="tel" placeholder="(11) 99999-9999"></div>
+
+      <div id="f-campos-cliente">
+        <div class="r2">
+          <div class="fg"><label class="fl">Nome completo</label><input id="f-nome" type="text" placeholder="Ex: Maria Silva"></div>
+          <div class="fg"><label class="fl">Data de nascimento</label><input id="f-nasc" type="date"></div>
+        </div>
+        <div class="fg"><label class="fl">WhatsApp</label><input id="f-tel" type="tel" placeholder="(11) 99999-9999"></div>
+      </div>
       <div class="slbl">Produtos</div>
       <div class="phint" id="phint">Toque num produto para adicionar ao carrinho:</div>
       <div class="pchips" id="prod-picker"></div>
@@ -574,6 +586,44 @@ textarea{resize:vertical;min-height:80px}
       </div>
       <div id="cx-lista"></div>
     </div>
+  </div>
+
+  <!-- RELATÓRIO -->
+  <div class="sec" id="s-relatorio">
+    <div class="card">
+      <div class="ctitle">📊 Relatório mensal</div>
+      <div class="r2">
+        <div class="fg"><label class="fl">Mês</label>
+          <select id="rel-mes">
+            <option value="1">Janeiro</option><option value="2">Fevereiro</option><option value="3">Março</option>
+            <option value="4">Abril</option><option value="5">Maio</option><option value="6">Junho</option>
+            <option value="7">Julho</option><option value="8">Agosto</option><option value="9">Setembro</option>
+            <option value="10">Outubro</option><option value="11">Novembro</option><option value="12">Dezembro</option>
+          </select>
+        </div>
+        <div class="fg"><label class="fl">Ano</label>
+          <select id="rel-ano"></select>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:4px">
+        <button class="bprim" style="margin-top:0;flex:1" onclick="gerarRelatorio()">Gerar relatório</button>
+        <button class="bsec" style="flex:1;padding:11px" onclick="exportarPDF()">⬇️ Exportar PDF</button>
+      </div>
+    </div>
+
+    <!-- Gráfico -->
+    <div class="card" id="rel-grafico-card" style="display:none">
+      <div class="ctitle" id="rel-titulo"></div>
+      <canvas id="rel-chart" height="200"></canvas>
+    </div>
+
+    <!-- Métricas do mês -->
+    <div id="rel-metricas" style="display:none">
+      <div class="mg3" id="rel-met-grid"></div>
+    </div>
+
+    <!-- Conteúdo do relatório -->
+    <div id="rel-body"></div>
   </div>
 
   <!-- CONFIG -->
@@ -930,12 +980,269 @@ function iniciarApp(){
   document.getElementById('cx-data').value=today();
   updatePrev();
   renderPicker();
+  renderClienteSel();
   verificarNotificacoes();
 }
 
 // ══════════════════════════════════════
-// NOTIFICAÇÕES + MENSALIDADE
+// BANCO DE CONTATOS — Seletor na Nova Venda
 // ══════════════════════════════════════
+function renderClienteSel(){
+  const sel=document.getElementById('f-cliente-sel');
+  if(!sel)return;
+  // Extrai contatos únicos dos clientes já cadastrados
+  const vistos=new Set();
+  const contatos=[];
+  db.clientes.forEach(c=>{
+    if(!vistos.has(c.nome)){
+      vistos.add(c.nome);
+      contatos.push({nome:c.nome,nasc:c.nasc||'',tel:c.tel||''});
+    }
+  });
+  contatos.sort((a,b)=>a.nome.localeCompare(b.nome));
+  sel.innerHTML='<option value="">— Novo cliente —</option>'+
+    contatos.map((c,i)=>`<option value="${i}">${esc(c.nome)}${c.tel?' — '+c.tel:''}</option>`).join('');
+  sel._contatos=contatos;
+}
+
+function selecionarClienteExistente(val){
+  const sel=document.getElementById('f-cliente-sel');
+  if(!val){
+    document.getElementById('f-nome').value='';
+    document.getElementById('f-nasc').value='';
+    document.getElementById('f-tel').value='';
+    return;
+  }
+  const c=sel._contatos[parseInt(val)];
+  if(!c)return;
+  document.getElementById('f-nome').value=c.nome;
+  document.getElementById('f-nasc').value=c.nasc||'';
+  document.getElementById('f-tel').value=c.tel||'';
+}
+
+// ══════════════════════════════════════
+// RELATÓRIO MENSAL + GRÁFICO + PDF
+// ══════════════════════════════════════
+let chartInstance=null;
+
+function initRelatorio(){
+  // Preenche anos disponíveis
+  const anos=new Set();
+  const anoAtual=new Date().getFullYear();
+  anos.add(anoAtual);
+  db.clientes.forEach(c=>{
+    if(c.criado) anos.add(new Date(c.criado).getFullYear());
+    c.parcelas.forEach(p=>{if(p.data)anos.add(parseInt(p.data.split('-')[0]));});
+  });
+  const selAno=document.getElementById('rel-ano');
+  selAno.innerHTML=[...anos].sort((a,b)=>b-a).map(a=>`<option value="${a}"${a===anoAtual?' selected':''}>${a}</option>`).join('');
+  // Preenche mês atual
+  document.getElementById('rel-mes').value=new Date().getMonth()+1;
+}
+
+function gerarRelatorio(){
+  const mes=parseInt(document.getElementById('rel-mes').value);
+  const ano=parseInt(document.getElementById('rel-ano').value);
+  const mesStr=String(mes).padStart(2,'0');
+  const prefixo=`${ano}-${mesStr}`;
+  const nomes=['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+
+  // Vendas do mês
+  const vendasMes=db.clientes.filter(c=>c.criado&&c.criado.startsWith(prefixo));
+  // Parcelas recebidas no mês
+  const parcelasRecMes=[];
+  db.clientes.forEach(c=>{
+    c.parcelas.forEach((p,pi)=>{
+      if(p.pago&&p.data&&p.data.startsWith(prefixo)){
+        parcelasRecMes.push({nome:c.nome,parc:`${pi+1}/${c.parc}`,valor:c.valParc,data:fmtD(p.data)});
+      }
+    });
+  });
+  // Parcelas pendentes do mês
+  const parcelasPendMes=[];
+  db.clientes.forEach(c=>{
+    c.parcelas.forEach((p,pi)=>{
+      if(!p.pago&&p.data&&p.data.startsWith(prefixo)){
+        parcelasPendMes.push({nome:c.nome,parc:`${pi+1}/${c.parc}`,valor:c.valParc,data:fmtD(p.data)});
+      }
+    });
+  });
+  // Saídas do mês
+  const saidasMes=db.caixa.filter(m=>m.tipo==='saida'&&m.data&&m.data.startsWith(prefixo)&&m.valor>0);
+
+  const totalVendas=vendasMes.reduce((a,c)=>a+c.valor,0);
+  const totalRecebido=parcelasRecMes.reduce((a,p)=>a+p.valor,0)+vendasMes.filter(c=>c.parc===1&&c.parcelas[0]?.pago).reduce((a,c)=>a+c.valor,0);
+  const totalPendente=parcelasPendMes.reduce((a,p)=>a+p.valor,0);
+  const totalSaidas=saidasMes.reduce((a,m)=>a+m.valor,0);
+
+  document.getElementById('rel-titulo').textContent=`${nomes[mes]} / ${ano}`;
+  document.getElementById('rel-grafico-card').style.display='block';
+  document.getElementById('rel-metricas').style.display='block';
+
+  // Métricas
+  document.getElementById('rel-met-grid').innerHTML=`
+    <div class="met p"><div class="mval">${vendasMes.length}</div><div class="mlbl">Vendas no mês</div></div>
+    <div class="met g"><div class="mval">${fmtV(totalVendas)}</div><div class="mlbl">Total vendido</div></div>
+    <div class="met t"><div class="mval">${fmtV(totalRecebido)}</div><div class="mlbl">Recebido</div></div>
+    <div class="met o"><div class="mval">${fmtV(totalPendente)}</div><div class="mlbl">A receber</div></div>
+    <div class="met r"><div class="mval">${fmtV(totalSaidas)}</div><div class="mlbl">Saídas</div></div>
+    <div class="met"><div class="mval" style="color:${totalRecebido-totalSaidas>=0?'var(--gr)':'var(--rd)'}">${fmtV(totalRecebido-totalSaidas)}</div><div class="mlbl">Lucro líquido</div></div>`;
+
+  // Gráfico — vendas por semana do mês
+  const semanas=['Sem. 1','Sem. 2','Sem. 3','Sem. 4'];
+  const porSemana=[0,0,0,0];
+  vendasMes.forEach(c=>{
+    const dia=new Date(c.criado).getDate();
+    const s=Math.min(Math.floor((dia-1)/7),3);
+    porSemana[s]+=c.valor;
+  });
+  renderChart(semanas,porSemana,`Vendas por semana — ${nomes[mes]}/${ano}`);
+
+  // Corpo do relatório
+  let html='';
+  if(vendasMes.length){
+    html+=`<div class="card"><div class="ctitle">🛍️ Vendas realizadas (${vendasMes.length})</div>`;
+    vendasMes.forEach(c=>{
+      html+=`<div class="ir">
+        <div class="ii"><div style="font-weight:500">${esc(c.nome)}</div><div style="font-size:12px;color:var(--tx3)">${esc(c.produto)}</div></div>
+        <div style="text-align:right"><div style="font-weight:600">${fmtV(c.valor)}</div><div style="font-size:11px;color:var(--tx3)">${c.parc}x de ${fmtV(c.valParc)}</div></div>
+      </div>`;
+    });
+    html+='</div>';
+  }
+  if(parcelasRecMes.length){
+    html+=`<div class="card"><div class="ctitle">✅ Parcelas recebidas (${parcelasRecMes.length})</div>`;
+    parcelasRecMes.forEach(p=>{
+      html+=`<div class="ir"><div class="ii"><div style="font-weight:500">${esc(p.nome)}</div><div style="font-size:12px;color:var(--tx3)">Parcela ${p.parc} — ${p.data}</div></div><span style="font-weight:600;color:var(--gr)">${fmtV(p.valor)}</span></div>`;
+    });
+    html+='</div>';
+  }
+  if(parcelasPendMes.length){
+    html+=`<div class="card"><div class="ctitle">⏳ Parcelas pendentes (${parcelasPendMes.length})</div>`;
+    parcelasPendMes.forEach(p=>{
+      html+=`<div class="ir"><div class="ii"><div style="font-weight:500">${esc(p.nome)}</div><div style="font-size:12px;color:var(--tx3)">Parcela ${p.parc} — ${p.data}</div></div><span style="font-weight:600;color:var(--am)">${fmtV(p.valor)}</span></div>`;
+    });
+    html+='</div>';
+  }
+  if(saidasMes.length){
+    html+=`<div class="card"><div class="ctitle">💸 Saídas (${saidasMes.length})</div>`;
+    saidasMes.forEach(m=>{
+      html+=`<div class="ir"><div class="ii"><div style="font-weight:500">${esc(m.desc)}</div><div style="font-size:12px;color:var(--tx3)">${fmtD(m.data)}</div></div><span style="font-weight:600;color:var(--rd)">${fmtV(m.valor)}</span></div>`;
+    });
+    html+='</div>';
+  }
+  if(!html) html='<div class="empty">Nenhum dado encontrado para este período.</div>';
+  document.getElementById('rel-body').innerHTML=html;
+}
+
+function renderChart(labels,data,titulo){
+  const canvas=document.getElementById('rel-chart');
+  if(chartInstance){chartInstance.destroy();chartInstance=null;}
+  if(!window.Chart){
+    // Carrega Chart.js dinamicamente
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js';
+    s.onload=()=>desenharChart(canvas,labels,data,titulo);
+    document.head.appendChild(s);
+  }else{
+    desenharChart(canvas,labels,data,titulo);
+  }
+}
+
+function desenharChart(canvas,labels,data,titulo){
+  chartInstance=new Chart(canvas,{
+    type:'bar',
+    data:{
+      labels,
+      datasets:[{
+        label:'Vendas (R$)',
+        data,
+        backgroundColor:'rgba(214,0,92,.7)',
+        borderColor:'rgba(214,0,92,1)',
+        borderWidth:2,
+        borderRadius:6
+      }]
+    },
+    options:{
+      responsive:true,
+      plugins:{
+        legend:{display:false},
+        title:{display:true,text:titulo,font:{size:13}}
+      },
+      scales:{
+        y:{beginAtZero:true,ticks:{callback:v=>'R$ '+v.toFixed(0)}}
+      }
+    }
+  });
+}
+
+function exportarPDF(){
+  const mes=document.getElementById('rel-mes').value;
+  const ano=document.getElementById('rel-ano').value;
+  const nomes=['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  const loja=db.config.loja||'ControleFácil';
+
+  // Coleta dados para o PDF
+  const mesStr=String(mes).padStart(2,'0');
+  const prefixo=`${ano}-${mesStr}`;
+  const vendasMes=db.clientes.filter(c=>c.criado&&c.criado.startsWith(prefixo));
+  const parcelasRec=[];
+  const parcelasPend=[];
+  db.clientes.forEach(c=>{
+    c.parcelas.forEach((p,pi)=>{
+      if(p.data&&p.data.startsWith(prefixo)){
+        if(p.pago) parcelasRec.push({nome:c.nome,parc:`${pi+1}/${c.parc}`,valor:c.valParc,data:fmtD(p.data)});
+        else parcelasPend.push({nome:c.nome,parc:`${pi+1}/${c.parc}`,valor:c.valParc,data:fmtD(p.data)});
+      }
+    });
+  });
+  const saidasMes=db.caixa.filter(m=>m.tipo==='saida'&&m.data&&m.data.startsWith(prefixo)&&m.valor>0);
+  const totalV=vendasMes.reduce((a,c)=>a+c.valor,0);
+  const totalR=parcelasRec.reduce((a,p)=>a+p.valor,0);
+  const totalP=parcelasPend.reduce((a,p)=>a+p.valor,0);
+  const totalS=saidasMes.reduce((a,m)=>a+m.valor,0);
+
+  const win=window.open('','_blank');
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
+  <title>Relatório ${nomes[mes]}/${ano}</title>
+  <style>
+    body{font-family:Arial,sans-serif;padding:30px;color:#1A0D12;font-size:13px}
+    h1{font-size:20px;color:#D6005C;margin-bottom:4px}
+    h2{font-size:14px;color:#7A5060;font-weight:normal;margin-bottom:20px}
+    h3{font-size:14px;margin:20px 0 8px;color:#1A0D12;border-bottom:1px solid #F0D6E4;padding-bottom:4px}
+    table{width:100%;border-collapse:collapse;margin-bottom:16px}
+    th{background:#F0D6E4;padding:6px 10px;text-align:left;font-size:12px}
+    td{padding:6px 10px;border-bottom:1px solid #F7F0F5}
+    .met-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px}
+    .met{background:#FBF0F5;border-radius:8px;padding:10px;text-align:center}
+    .met-val{font-size:18px;font-weight:700;color:#D6005C}
+    .met-lbl{font-size:10px;color:#7A5060;text-transform:uppercase;letter-spacing:.05em}
+    .ok{color:#1A6640;font-weight:600}.am{color:#92400E;font-weight:600}.rd{color:#991B1B;font-weight:600}
+    @media print{body{padding:15px}}
+  </style></head><body>
+  <h1>${loja}</h1>
+  <h2>Relatório Mensal — ${nomes[mes]} / ${ano}</h2>
+  <div class="met-grid">
+    <div class="met"><div class="met-val">${vendasMes.length}</div><div class="met-lbl">Vendas</div></div>
+    <div class="met"><div class="met-val">${fmtV(totalV)}</div><div class="met-lbl">Total vendido</div></div>
+    <div class="met"><div class="met-val">${fmtV(totalR)}</div><div class="met-lbl">Recebido</div></div>
+    <div class="met"><div class="met-val">${fmtV(totalP)}</div><div class="met-lbl">A receber</div></div>
+    <div class="met"><div class="met-val">${fmtV(totalS)}</div><div class="met-lbl">Saídas</div></div>
+    <div class="met"><div class="met-val" style="color:${totalR-totalS>=0?'#1A6640':'#991B1B'}">${fmtV(totalR-totalS)}</div><div class="met-lbl">Lucro líquido</div></div>
+  </div>
+  ${vendasMes.length?`<h3>🛍️ Vendas realizadas</h3><table><tr><th>Cliente</th><th>Produto</th><th>Total</th><th>Parcelas</th></tr>
+  ${vendasMes.map(c=>`<tr><td>${c.nome}</td><td>${c.produto}</td><td>${fmtV(c.valor)}</td><td>${c.parc}x ${fmtV(c.valParc)}</td></tr>`).join('')}</table>`:''}
+  ${parcelasRec.length?`<h3>✅ Parcelas recebidas</h3><table><tr><th>Cliente</th><th>Parcela</th><th>Valor</th><th>Data</th></tr>
+  ${parcelasRec.map(p=>`<tr><td>${p.nome}</td><td>${p.parc}</td><td class="ok">${fmtV(p.valor)}</td><td>${p.data}</td></tr>`).join('')}</table>`:''}
+  ${parcelasPend.length?`<h3>⏳ Parcelas pendentes</h3><table><tr><th>Cliente</th><th>Parcela</th><th>Valor</th><th>Vencimento</th></tr>
+  ${parcelasPend.map(p=>`<tr><td>${p.nome}</td><td>${p.parc}</td><td class="am">${fmtV(p.valor)}</td><td>${p.data}</td></tr>`).join('')}</table>`:''}
+  ${saidasMes.length?`<h3>💸 Saídas</h3><table><tr><th>Descrição</th><th>Data</th><th>Valor</th></tr>
+  ${saidasMes.map(m=>`<tr><td>${m.desc}</td><td>${fmtD(m.data)}</td><td class="rd">${fmtV(m.valor)}</td></tr>`).join('')}</table>`:''}
+  <p style="font-size:11px;color:#B08898;margin-top:30px;text-align:center">Gerado pelo ControleFácil em ${new Date().toLocaleDateString('pt-BR')}</p>
+  <script>window.onload=()=>window.print()<\/script>
+  </body></html>`);
+  win.document.close();
+}
 function verificarNotificacoes(){
   const banner=document.getElementById('notif-banner');
   let html='';
@@ -1055,7 +1362,7 @@ async function solicitarNotificacao(alertas){
 // ══════════════════════════════════════
 // TABS
 // ══════════════════════════════════════
-const TABS=['nova','clientes','hoje','estoque','caixa','config'];
+const TABS=['nova','clientes','hoje','estoque','caixa','relatorio','config'];
 function go(t){
   document.querySelectorAll('.tab').forEach(b=>b.classList.remove('on'));
   document.querySelectorAll('.sec').forEach(s=>s.classList.remove('on'));
@@ -1063,6 +1370,7 @@ function go(t){
   document.getElementById('s-'+t).classList.add('on');
   if(t==='clientes'){renderCli();verificarNotificacoes();}
   if(t==='hoje')renderHoje();
+  if(t==='relatorio')initRelatorio();
   if(t==='estoque')renderEst();
   if(t==='caixa')renderCaixa();
   if(t==='config')updatePrev();
@@ -1247,7 +1555,9 @@ async function salvarVenda(){
   carrinho=[];pickProd=null;pickTam=null;
   document.getElementById('tam-wrap').style.display='none';
   document.getElementById('carrinho-wrap').style.display='none';
+  document.getElementById('f-cliente-sel').value='';
   renderPicker();
+  renderClienteSel();
   alert(`✅ Venda registrada!\n\n👤 ${nome}\n🛍️ ${prod}\n💰 ${fmtV(valor)} em ${parc}x de ${fmtV(valParc)}`);
   go('clientes');
 }
