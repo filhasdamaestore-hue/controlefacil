@@ -574,10 +574,14 @@ textarea{resize:vertical;min-height:80px}
       <button class="bprim" onclick="salvarMov()">Adicionar ao caixa</button>
     </div>
     <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;flex-wrap:wrap;gap:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:8px">
         <div class="ctitle" style="margin-bottom:0">Extrato do caixa</div>
-        <button class="bsec bdng" onclick="limparCaixa()">Limpar histórico</button>
+        <div style="display:flex;gap:6px">
+          <button class="bsec" onclick="corrigirDuplicados()">🧹 Corrigir duplicados</button>
+          <button class="bsec bdng" onclick="limparCaixa()">Limpar histórico</button>
+        </div>
       </div>
+      <div style="font-size:12px;color:var(--tx3);margin-bottom:1rem">💡 Aqui só aparece dinheiro que entrou ou saiu de verdade: vendas à vista, parcelas recebidas e despesas. Venda a prazo só conta quando a parcela é paga.</div>
       <div class="fbar">
         <button class="fbtn on" onclick="fxCaixa('todos',this)">Todos</button>
         <button class="fbtn" onclick="fxCaixa('entrada',this)">Entradas</button>
@@ -1058,7 +1062,8 @@ function renderDashboard(){
     (c.parcelas||[]).forEach(p=>{
       if(!p.data)return;
       if(p.pago){
-        if(p.data.startsWith(prefMes)) recebidoMes+=c.valParc||0;
+        const dataPg=p.pagoEm||p.data; // usa a data em que foi realmente pago
+        if(dataPg.startsWith(prefMes)) recebidoMes+=c.valParc||0;
       }else{
         aReceberTotal+=c.valParc||0;
         if(p.data<hoje){ // vencida e não paga = atrasada
@@ -1667,14 +1672,17 @@ async function salvarVenda(){
   const c={nome,nasc,tel,valor,parc,valParc,produto:prod,itens:[...carrinho],parcelas,criado:new Date().toISOString()};
   await saveCliente(c);
   db.clientes.unshift(c);
-  // Lança no caixa como venda (entrada)
-  const m={tipo:'entrada',valor,desc:`Venda: ${prod} (${nome})`,data:today(),cat:'venda'};
-  await saveMov(m);db.caixa.unshift(m);
-  // Se for à vista (1x), já marca a parcela como paga automaticamente — sem lançar de novo no caixa
+  // ── CAIXA: só lança dinheiro que entrou DE VERDADE ──
   if(parc===1){
+    // À vista: o valor entra no caixa hoje e a parcela já fica paga
     db.clientes[0].parcelas[0].pago=true;
+    db.clientes[0].parcelas[0].pagoEm=today();
+    const m={tipo:'entrada',valor,desc:`Venda à vista: ${prod} (${nome})`,data:today(),cat:'venda'};
+    await saveMov(m);db.caixa.unshift(m);
+    db.clientes[0].parcelas[0].movRid=m._rid||null;
     await saveCliente(db.clientes[0]);
   }
+  // A prazo: NADA entra no caixa agora — cada parcela é lançada quando for marcada como paga
   loading(false);
   ['f-nome','f-nasc','f-tel','f-valor','f-datapag'].forEach(id=>document.getElementById(id).value='');
   carrinho=[];pickProd=null;pickTam=null;
@@ -1690,19 +1698,39 @@ async function salvarVenda(){
 // ══════════════════════════════════════
 // CLIENTES
 // ══════════════════════════════════════
+function mesQuitacao(c){
+  // mês em que a última parcela foi paga (usa a data do pagamento; se for venda antiga sem essa info, usa o vencimento)
+  let max='';
+  c.parcelas.forEach(p=>{const d=p.pagoEm||p.data||'';if(d>max)max=d;});
+  return max.slice(0,7);
+}
+let quitAberto={};
+function toggleMesQuit(k){
+  quitAberto[k]=!quitAberto[k];
+  const el=document.getElementById('quit-'+k);
+  if(el)el.style.display=quitAberto[k]?'block':'none';
+  const seta=document.getElementById('seta-'+k);
+  if(seta)seta.textContent=quitAberto[k]?'▾':'▸';
+}
+
 function renderCli(){
   const hoje=today();
-  const tot=db.clientes.length;
-  const vTot=db.clientes.reduce((a,c)=>a+c.valor,0);
-  const pend=db.clientes.reduce((a,c)=>a+c.parcelas.filter(p=>!p.pago).length,0);
+  const ativos=[],quitados=[];
+  db.clientes.forEach((c,ci)=>{
+    const pagas=c.parcelas.filter(p=>p.pago).length;
+    (pagas===c.parc?quitados:ativos).push({c,ci});
+  });
+  const aReceber=ativos.reduce((a,{c})=>a+c.parcelas.filter(p=>!p.pago).length*c.valParc,0);
+  const pend=ativos.reduce((a,{c})=>a+c.parcelas.filter(p=>!p.pago).length,0);
   document.getElementById('cli-met').innerHTML=`
-    <div class="met"><div class="mval">${tot}</div><div class="mlbl">Clientes</div></div>
-    <div class="met t"><div class="mval">${fmtV(vTot)}</div><div class="mlbl">Total vendas</div></div>
-    <div class="met"><div class="mval">${pend}</div><div class="mlbl">Parc. pendentes</div></div>`;
+    <div class="met"><div class="mval">${ativos.length}</div><div class="mlbl">Em aberto</div></div>
+    <div class="met o"><div class="mval">${fmtV(aReceber)}</div><div class="mlbl">A receber (${pend} parc.)</div></div>
+    <div class="met g"><div class="mval">${quitados.length}</div><div class="mlbl">✅ Quitadas</div></div>`;
   if(!db.clientes.length){document.getElementById('lista-cli').innerHTML='<div class="empty">Nenhuma venda registrada.</div>';return;}
   let html='';
-  db.clientes.forEach((c,ci)=>{
-    const pagas=c.parcelas.filter(p=>p.pago).length,quit=pagas===c.parc;
+  if(!ativos.length)html+='<div class="empty">🎉 Nenhuma compra em aberto. Todas quitadas!</div>';
+  ativos.forEach(({c,ci})=>{
+    const pagas=c.parcelas.filter(p=>p.pago).length;
     let ph='';
     c.parcelas.forEach((p,pi)=>{
       const isHoje=p.data===hoje,venc=p.data<hoje&&!p.pago;
@@ -1724,7 +1752,7 @@ function renderCli(){
     html+=`<div class="card">
       <div class="ch">
         <div><div class="cnome">${esc(c.nome)}</div><div class="csub">${esc(c.tel||'Sem telefone')}${c.nasc?' • Nasc. '+fmtD(c.nasc):''}</div></div>
-        <span class="bdg ${quit?'bok':'bpend'}">${quit?'Quitado':`${pagas}/${c.parc} pagas`}</span>
+        <span class="bdg bpend">${pagas}/${c.parc} pagas</span>
       </div>
       <div class="ctot">${esc(c.produto)} • ${fmtV(c.valor)} • ${c.parc}x de ${fmtV(c.valParc)}</div>
       ${ph}
@@ -1735,21 +1763,67 @@ function renderCli(){
       </div>
     </div>`;
   });
+
+  // ── Arquivo: quitadas agrupadas pelo mês em que foram quitadas
+  if(quitados.length){
+    const nomes=['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+    const grupos={};
+    quitados.forEach(q=>{
+      const k=mesQuitacao(q.c)||'sem-data';
+      (grupos[k]=grupos[k]||[]).push(q);
+    });
+    const chaves=Object.keys(grupos).sort((a,b)=>b.localeCompare(a)); // mais recente primeiro
+    html+=`<div class="card" style="border-color:var(--gr-bg)"><div class="ctitle" style="color:var(--gr)">📁 Compras quitadas (${quitados.length})</div>`;
+    chaves.forEach(k=>{
+      const g=grupos[k];
+      const totalG=g.reduce((a,{c})=>a+(c.valor||0),0);
+      let titulo='Sem data';
+      if(k!=='sem-data'){const[ano,mes]=k.split('-');titulo=`${nomes[parseInt(mes)]} / ${ano}`;}
+      const aberto=!!quitAberto[k];
+      html+=`<div class="ir" style="cursor:pointer" onclick="toggleMesQuit('${k}')">
+        <div class="ii" style="font-weight:600"><span id="seta-${k}">${aberto?'▾':'▸'}</span> ${titulo}</div>
+        <div style="text-align:right;font-size:12px;color:var(--tx3)">${g.length} compra${g.length===1?'':'s'} • <span style="color:var(--gr);font-weight:600">${fmtV(totalG)}</span></div>
+      </div>
+      <div id="quit-${k}" style="display:${aberto?'block':'none'};padding-left:14px">`;
+      g.forEach(({c,ci})=>{
+        html+=`<div class="ir">
+          <div class="ii">
+            <div style="font-weight:500">${esc(c.nome)} <span class="bdg bok" style="margin-left:4px">Quitado</span></div>
+            <div style="font-size:12px;color:var(--tx3)">${esc(c.produto)} • ${c.parc}x</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-weight:600;color:var(--gr)">${fmtV(c.valor)}</span>
+            <button class="bsec bsm bext" onclick="event.stopPropagation();abrirExtrato(${ci})">📄</button>
+            <button class="bsec bsm bdng" onclick="event.stopPropagation();delCli(${ci})">✕</button>
+          </div>
+        </div>`;
+      });
+      html+=`</div>`;
+    });
+    html+='</div>';
+  }
   document.getElementById('lista-cli').innerHTML=html;
 }
 
 async function togglePago(ci,pi){
-  db.clientes[ci].parcelas[pi].pago=!db.clientes[ci].parcelas[pi].pago;
   const c=db.clientes[ci],p=c.parcelas[pi];
-  await saveCliente(c);
+  p.pago=!p.pago;
   if(p.pago){
-    // Só lança no caixa se for parcelado (mais de 1x)
-    // Venda à vista já foi lançada no momento da venda
+    p.pagoEm=today(); // guarda QUANDO foi pago (para o arquivo do mês)
     if(c.parc>1){
-      const m={tipo:'entrada',valor:c.valParc,desc:`Parcela ${pi+1}/${c.parc} - ${c.nome}`,data:today(),cat:'parcela'};
+      const m={tipo:'entrada',valor:c.valParc,desc:`Parcela ${pi+1}/${c.parc} — ${c.nome} (${c.produto})`,data:today(),cat:'parcela'};
       await saveMov(m);db.caixa.unshift(m);
+      p.movRid=m._rid||null;
     }
+  }else{
+    // Desfazer: remove também o lançamento do caixa para não sobrar entrada fantasma
+    if(p.movRid){
+      await deletarMov(p.movRid);
+      db.caixa=db.caixa.filter(m=>m._rid!==p.movRid);
+    }
+    delete p.pagoEm;delete p.movRid;
   }
+  await saveCliente(c);
   renderCli();
 }
 async function delCli(ci){
@@ -1902,13 +1976,14 @@ function copiar(ci,pi){
   navigator.clipboard.writeText(msg).then(()=>alert('Mensagem copiada!')).catch(()=>prompt('Copie:',msg));
 }
 async function pagoHoje(ci,pi){
-  db.clientes[ci].parcelas[pi].pago=true;
-  const c=db.clientes[ci];
-  await saveCliente(c);
+  const c=db.clientes[ci],p=c.parcelas[pi];
+  p.pago=true;p.pagoEm=today();
   if(c.parc>1){
-    const m={tipo:'entrada',valor:c.valParc,desc:`Parcela ${pi+1}/${c.parc} - ${c.nome}`,data:today(),cat:'parcela'};
+    const m={tipo:'entrada',valor:c.valParc,desc:`Parcela ${pi+1}/${c.parc} — ${c.nome} (${c.produto})`,data:today(),cat:'parcela'};
     await saveMov(m);db.caixa.unshift(m);
+    p.movRid=m._rid||null;
   }
+  await saveCliente(c);
   renderHoje();
 }
 
@@ -2124,6 +2199,26 @@ function renderCaixa(){
     </div>`;
   }).join('');
 }
+async function corrigirDuplicados(){
+  // Vendas a prazo antigas que entraram no caixa com o valor total no dia da venda (antes da correção)
+  const dup=[];
+  db.clientes.filter(c=>c.parc>1).forEach(c=>{
+    const desc=`Venda: ${c.produto} (${c.nome})`;
+    db.caixa.forEach(m=>{
+      if(m.cat==='venda'&&m.tipo==='entrada'&&m.desc===desc&&Math.abs(m.valor-c.valor)<0.01&&!dup.includes(m))dup.push(m);
+    });
+  });
+  if(!dup.length){alert('✅ Nenhum lançamento duplicado encontrado. Seu caixa está limpo!');return;}
+  const tot=dup.reduce((a,m)=>a+m.valor,0);
+  if(!confirm(`Encontrei ${dup.length} lançamento(s) de venda A PRAZO que entraram no caixa antes do dinheiro ser recebido.\n\nTotal a remover: ${fmtV(tot)}\n\nAs parcelas que as clientes já pagaram continuam contando normalmente. Remover?`))return;
+  loading(true);
+  for(const m of dup){if(m._rid)await deletarMov(m._rid);}
+  db.caixa=db.caixa.filter(m=>!dup.includes(m));
+  loading(false);
+  renderCaixa();
+  alert('✅ Caixa corrigido! Agora ele mostra só o dinheiro que entrou de verdade.');
+}
+
 async function delMov(rid){
   if(!confirm('Excluir?'))return;
   await deletarMov(rid);
