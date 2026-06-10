@@ -432,7 +432,11 @@ textarea{resize:vertical;min-height:80px}
   <!-- NOVA VENDA -->
   <div class="sec on" id="s-nova">
     <div class="card">
-      <div class="ctitle">Registrar nova venda</div>
+      <div class="ctitle" id="nv-titulo">Registrar nova venda</div>
+      <div style="display:flex;gap:8px;margin-bottom:1.25rem">
+        <button class="tipo-btn sel" id="modo-venda" onclick="setModo('venda')">🛒 Venda</button>
+        <button class="tipo-btn" id="modo-cond" onclick="setModo('condicional')">👜 Condicional</button>
+      </div>
       <div class="slbl">Dados do cliente</div>
 
       <!-- Seletor de cliente existente -->
@@ -492,6 +496,7 @@ textarea{resize:vertical;min-height:80px}
           <button class="bsec" onclick="addManual()">+ Add</button>
         </div>
       </div>
+      <div id="bloco-pagamento">
       <div class="slbl">Pagamento</div>
       <div class="r2">
         <div class="fg"><label class="fl">Valor total (R$)</label><input id="f-valor" type="number" placeholder="Preenchido automaticamente" min="0" step="0.01"></div>
@@ -513,6 +518,13 @@ textarea{resize:vertical;min-height:80px}
       </div>
       <div class="fg"><label class="fl">Data do 1º pagamento</label><input id="f-datapag" type="date"></div>
       <button class="bprim" onclick="salvarVenda()">✅ Registrar venda</button>
+      </div>
+      <div id="bloco-condicional" style="display:none">
+        <div class="slbl">Condicional</div>
+        <div class="fg"><label class="fl">Devolução combinada para</label><input id="f-datadev" type="date"></div>
+        <div style="font-size:12px;color:var(--tx3);margin-top:4px">As peças saem do estoque agora. Quando ela decidir, você marca o que virou venda e o que voltou.</div>
+        <button class="bprim" style="background:var(--tl,#0d9488)" onclick="registrarCondicional()">👜 Registrar condicional</button>
+      </div>
     </div>
   </div>
 
@@ -2046,6 +2058,39 @@ function renderHoje(){
 
   let html='';
 
+  // Condicionais abertos
+  const conds=db.config.condicionais||[];
+  if(conds.length){
+    html+=`<div class="card" style="border-color:var(--tl-bg,#99F6E4)"><div class="ctitle" style="color:var(--tl,#0d9488)">👜 Condicionais abertos (${conds.length})</div>`;
+    [...conds].sort((a,b)=>(a.dataDev||'').localeCompare(b.dataDev||'')).forEach(cond=>{
+      const venceu=cond.dataDev&&cond.dataDev<hoje;
+      const eHoje=cond.dataDev===hoje;
+      let itensHtml='';
+      cond.itens.forEach((i,idx)=>{
+        itensHtml+=`<div class="ir" style="padding:6px 0">
+          <div class="ii" style="font-size:13px">${esc(i.nome)}</div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:13px;font-weight:600">${fmtV(i.valor)}</span>
+            <button class="bsec bsm" title="Esta peça voltou" onclick="devolverItemCond(${cond.id},${idx})">↩</button>
+          </div>
+        </div>`;
+      });
+      html+=`<div style="border:1px solid var(--bdr);border-radius:var(--r);padding:12px;margin-bottom:10px${venceu?';background:var(--rd-bg)':''}">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
+          <div><div style="font-weight:600">${esc(cond.nome)}</div>
+          <div style="font-size:12px;color:${venceu?'var(--rd)':'var(--tx3)'}">${cond.itens.length} peça${cond.itens.length===1?'':'s'} • ${fmtV(cond.total)} • devolução ${fmtD(cond.dataDev)}${venceu?' ⚠️ VENCEU':eHoje?' — É HOJE!':''}</div></div>
+        </div>
+        ${itensHtml}
+        <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+          <button class="bprim" style="margin-top:0;flex:1;padding:8px;font-size:13px" onclick="condVirouVenda(${cond.id})">💰 Virou venda</button>
+          <button class="bsec" style="flex:1;padding:8px" onclick="devolverTudoCond(${cond.id})">↩️ Devolveu tudo</button>
+          ${cond.tel?`<button class="bwa" style="padding:8px 12px" onclick="enviarMsgCond(${cond.id})">📲</button>`:''}
+        </div>
+      </div>`;
+    });
+    html+='</div>';
+  }
+
   if(nivers.length){
     html+=`<div class="card" style="border-color:var(--pk-bg)"><div class="ctitle" style="color:var(--pk)">🎂 Aniversariantes</div>`;
     nivers.forEach(({c,ci,quando})=>{
@@ -2095,7 +2140,7 @@ function renderHoje(){
     });
   }
 
-  if(!html)html='<div class="alrt">Nenhuma cobrança para hoje e ninguém em atraso. Bom dia! ✨</div>';
+  if(!html)html='<div class="alrt">Nenhuma cobrança, atraso ou condicional pendente. Bom dia! ✨</div>';
   document.getElementById('hoje-body').innerHTML=html;
 }
 
@@ -2104,6 +2149,124 @@ function parabenizar(ci){
   const loja=db.config.loja||'ControleFácil';
   const msg=`🎉🎂 Feliz aniversário, ${c.nome}!\n\nQue seu dia seja repleto de alegria e coisas boas!\n\nPassa aqui pra escolher um presente pra você — cliente especial merece carinho especial. 💕\n\n— ${loja}`;
   window.open(waLink(c.tel,msg),'_blank');
+}
+
+// ══════════════════════════════════════
+// CONDICIONAL
+// ══════════════════════════════════════
+let modoVenda='venda';
+function setModo(m){
+  modoVenda=m;
+  document.getElementById('modo-venda').classList.toggle('sel',m==='venda');
+  document.getElementById('modo-cond').classList.toggle('sel',m==='condicional');
+  document.getElementById('bloco-pagamento').style.display=m==='venda'?'block':'none';
+  document.getElementById('bloco-condicional').style.display=m==='condicional'?'block':'none';
+  document.getElementById('nv-titulo').textContent=m==='venda'?'Registrar nova venda':'Registrar condicional';
+}
+
+function msgCondicional(cond){
+  const loja=db.config.loja||'ControleFácil';
+  const lista=cond.itens.map(i=>`• ${i.nome} — ${fmtV(i.valor)}`).join('\n');
+  return`Olá, ${cond.nome}! 😊\n\nConfirmando as peças que você levou no condicional hoje, ${fmtD(cond.criado)}:\n\n${lista}\n\nTotal das peças: ${fmtV(cond.total)}\nDevolução combinada: ${fmtD(cond.dataDev)}\n\nO que você decidir ficar é só me avisar que a gente acerta o pagamento. O restante é só devolver até a data combinada, tá bom?\n\nQualquer dúvida me chama! 💕\n\n— ${loja}`;
+}
+
+async function registrarCondicional(){
+  const nome=document.getElementById('f-nome').value.trim();
+  const tel=document.getElementById('f-tel').value.trim();
+  const dataDev=document.getElementById('f-datadev').value;
+  if(!nome){alert('Preencha o nome da cliente.');return;}
+  if(!carrinho.length){alert('Adicione pelo menos uma peça.');return;}
+  if(!dataDev){alert('Combine a data de devolução.');return;}
+  loading(true);
+  // Baixa do estoque (as peças saem da loja) e guarda referência para devolução
+  const itens=[];
+  for(const item of carrinho){
+    let prodRid=null;
+    if(item.prodIdx!==null&&item.tamIdx!==null&&db.produtos[item.prodIdx]){
+      const p=db.produtos[item.prodIdx];
+      const t=p.tamanhos[item.tamIdx];
+      if(t&&t.qtd>0){t.qtd--;await saveProduto(p);}
+      prodRid=p._rid||null;
+    }
+    itens.push({nome:item.nome,valor:item.valor||0,prodRid,tam:item.tam||null});
+  }
+  const total=itens.reduce((a,i)=>a+i.valor,0);
+  const cond={id:Date.now(),nome,tel,itens,total,dataDev,criado:today()};
+  db.config.condicionais=db.config.condicionais||[];
+  db.config.condicionais.push(cond);
+  await saveCfg();
+  loading(false);
+  ['f-nome','f-nasc','f-tel','f-datadev'].forEach(id=>document.getElementById(id).value='');
+  carrinho=[];pickProd=null;pickTam=null;
+  document.getElementById('tam-wrap').style.display='none';
+  document.getElementById('carrinho-wrap').style.display='none';
+  document.getElementById('f-cliente-sel').value='';
+  renderPicker();
+  alert(`👜 Condicional registrado!\n\n${nome} levou ${itens.length} peça(s) — ${fmtV(total)}\nDevolução: ${fmtD(dataDev)}`);
+  if(tel&&confirm(`📲 Enviar a confirmação do condicional no WhatsApp para ${nome}?\n\nIsso documenta tudo por escrito e te protege.`)){
+    window.open(waLink(tel,msgCondicional(cond)),'_blank');
+  }
+  go('hoje');
+}
+
+function condPorId(id){return(db.config.condicionais||[]).find(c=>c.id===id);}
+
+function enviarMsgCond(id){
+  const cond=condPorId(id);
+  if(!cond)return;
+  if(!cond.tel){alert('Cliente sem telefone cadastrado.');return;}
+  window.open(waLink(cond.tel,msgCondicional(cond)),'_blank');
+}
+
+async function voltarItemEstoque(item){
+  if(!item.prodRid||!item.tam)return;
+  const p=db.produtos.find(x=>x._rid===item.prodRid);
+  if(!p)return;
+  const t=(p.tamanhos||[]).find(t=>t.tam===item.tam);
+  if(t){t.qtd++;await saveProduto(p);}
+}
+
+async function devolverItemCond(id,idx){
+  const cond=condPorId(id);
+  if(!cond)return;
+  const item=cond.itens[idx];
+  if(!confirm(`Devolver "${item.nome}" ao estoque?`))return;
+  loading(true);
+  await voltarItemEstoque(item);
+  cond.itens.splice(idx,1);
+  cond.total=cond.itens.reduce((a,i)=>a+i.valor,0);
+  if(!cond.itens.length)db.config.condicionais=db.config.condicionais.filter(c=>c.id!==id);
+  await saveCfg();
+  loading(false);
+  renderHoje();
+}
+
+async function devolverTudoCond(id){
+  const cond=condPorId(id);
+  if(!cond)return;
+  if(!confirm(`${cond.nome} devolveu tudo?\n\nAs ${cond.itens.length} peça(s) voltam para o estoque.`))return;
+  loading(true);
+  for(const item of cond.itens)await voltarItemEstoque(item);
+  db.config.condicionais=db.config.condicionais.filter(c=>c.id!==id);
+  await saveCfg();
+  loading(false);
+  renderHoje();
+}
+
+async function condVirouVenda(id){
+  const cond=condPorId(id);
+  if(!cond)return;
+  if(!confirm(`${cond.nome} ficou com ${cond.itens.length} peça(s) — ${fmtV(cond.total)}?\n\nVou montar a venda com essas peças. Se ela devolveu alguma, use o ✕ na peça antes.`))return;
+  // monta o carrinho (sem baixar estoque de novo — já saiu no condicional)
+  carrinho=cond.itens.map(i=>({prodIdx:null,tamIdx:null,nome:i.nome,tam:i.tam,valor:i.valor}));
+  db.config.condicionais=db.config.condicionais.filter(c=>c.id!==id);
+  await saveCfg();
+  go('nova');
+  setModo('venda');
+  document.getElementById('f-nome').value=cond.nome;
+  document.getElementById('f-tel').value=cond.tel||'';
+  atualizarCarrinho();
+  alert('🛒 Carrinho montado! Agora escolha as parcelas e a data do 1º pagamento e registre a venda.');
 }
 
 function msgConfirmacao(c){
