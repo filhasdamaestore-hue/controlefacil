@@ -590,8 +590,20 @@ textarea{resize:vertical;min-height:80px}
 
   <!-- RELATÓRIO -->
   <div class="sec" id="s-relatorio">
+
+    <!-- PAINEL: realidade das vendas (renderiza sozinho) -->
+    <div class="mg3" id="dash-cards"></div>
+
     <div class="card">
-      <div class="ctitle">📊 Relatório mensal</div>
+      <div class="ctitle">📈 Vendas dos últimos 6 meses</div>
+      <canvas id="dash-chart" height="200"></canvas>
+    </div>
+
+    <div id="dash-atrasados"></div>
+
+    <!-- Relatório detalhado por mês (o antigo) -->
+    <div class="card">
+      <div class="ctitle">🔎 Relatório detalhado por mês</div>
       <div class="r2">
         <div class="fg"><label class="fl">Mês</label>
           <select id="rel-mes">
@@ -1025,7 +1037,120 @@ function selecionarClienteExistente(val){
 // ══════════════════════════════════════
 let chartInstance=null;
 
+// ══════════════════════════════════════
+// PAINEL — REALIDADE DAS VENDAS
+// ══════════════════════════════════════
+let dashChart=null;
+
+function renderDashboard(){
+  const hoje=today();
+  const prefMes=hoje.slice(0,7); // "2026-06"
+
+  // ── Números do mês atual
+  const vendasMes=db.clientes.filter(c=>c.criado&&c.criado.startsWith(prefMes));
+  const vendidoMes=vendasMes.reduce((a,c)=>a+(c.valor||0),0);
+
+  let recebidoMes=0, aReceberTotal=0, atrasadoTotal=0;
+  const atrasados=[]; // {cliente, ci, qtd, valor, diasAtraso, primeiraData}
+
+  db.clientes.forEach((c,ci)=>{
+    let qtdAtr=0, valAtr=0, primData=null;
+    (c.parcelas||[]).forEach(p=>{
+      if(!p.data)return;
+      if(p.pago){
+        if(p.data.startsWith(prefMes)) recebidoMes+=c.valParc||0;
+      }else{
+        aReceberTotal+=c.valParc||0;
+        if(p.data<hoje){ // vencida e não paga = atrasada
+          qtdAtr++; valAtr+=c.valParc||0;
+          if(!primData||p.data<primData)primData=p.data;
+        }
+      }
+    });
+    if(qtdAtr>0){
+      const dias=Math.floor((new Date(hoje+'T12:00:00')-new Date(primData+'T12:00:00'))/86400000);
+      atrasados.push({c,ci,qtd:qtdAtr,valor:valAtr,dias,primData});
+      atrasadoTotal+=valAtr;
+    }
+  });
+
+  atrasados.sort((a,b)=>b.dias-a.dias);
+
+  // ── Cards
+  document.getElementById('dash-cards').innerHTML=`
+    <div class="met p"><div class="mval">${fmtV(vendidoMes)}</div><div class="mlbl">Vendido este mês (${vendasMes.length} venda${vendasMes.length===1?'':'s'})</div></div>
+    <div class="met g"><div class="mval">${fmtV(recebidoMes)}</div><div class="mlbl">Recebido este mês</div></div>
+    <div class="met t"><div class="mval">${fmtV(aReceberTotal)}</div><div class="mlbl">Na rua (a receber)</div></div>
+    <div class="met r" style="grid-column:1/-1;${atrasadoTotal>0?'background:var(--rd-bg)':''}">
+      <div class="mval">${fmtV(atrasadoTotal)}</div>
+      <div class="mlbl">${atrasados.length===0?'🎉 Nenhuma parcela em atraso':`🔴 Em atraso — ${atrasados.length} cliente${atrasados.length===1?'':'s'} devendo`}</div>
+    </div>`;
+
+  // ── Gráfico: últimos 6 meses
+  const nomesAbrev=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  const labels=[],valores=[];
+  const base=new Date();
+  for(let i=5;i>=0;i--){
+    const d=new Date(base.getFullYear(),base.getMonth()-i,1);
+    const pref=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    labels.push(nomesAbrev[d.getMonth()]+'/'+String(d.getFullYear()).slice(2));
+    valores.push(db.clientes.filter(c=>c.criado&&c.criado.startsWith(pref)).reduce((a,c)=>a+(c.valor||0),0));
+  }
+  const desenhaDash=()=>{
+    if(dashChart){dashChart.destroy();dashChart=null;}
+    dashChart=new Chart(document.getElementById('dash-chart'),{
+      type:'bar',
+      data:{labels,datasets:[{label:'Vendido (R$)',data:valores,backgroundColor:'rgba(214,0,92,.7)',borderColor:'rgba(214,0,92,1)',borderWidth:2,borderRadius:6}]},
+      options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{callback:v=>'R$ '+Number(v).toFixed(0)}}}}
+    });
+  };
+  if(!window.Chart){
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js';
+    s.onload=desenhaDash;document.head.appendChild(s);
+  }else desenhaDash();
+
+  // ── Lista de atrasados
+  let html='';
+  if(atrasados.length){
+    html=`<div class="card" style="border-color:var(--rd-bg)"><div class="ctitle" style="color:var(--rd)">⚠️ Clientes em atraso (${atrasados.length})</div>`;
+    atrasados.forEach(a=>{
+      html+=`<div class="ir">
+        <div class="ii">
+          <div style="font-weight:600">${esc(a.c.nome)}</div>
+          <div style="font-size:12px;color:var(--tx3)">${a.qtd} parcela${a.qtd===1?'':'s'} vencida${a.qtd===1?'':'s'} • desde ${fmtD(a.primData)}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-weight:700;color:var(--rd)">${fmtV(a.valor)}</div>
+          <div style="font-size:11px;color:var(--rd)">${a.dias} dia${a.dias===1?'':'s'} de atraso</div>
+        </div>
+        <div style="display:flex;gap:6px;width:100%;margin-top:4px">
+          ${a.c.tel?`<button class="bwa" style="flex:1" onclick="cobrarAtrasado(${a.ci})">💬 Cobrar no WhatsApp</button>`:''}
+          <button class="bsec" style="flex:1;padding:6px 12px;font-size:12px;margin:0" onclick="abrirExtrato(${a.ci})">Ver parcelas</button>
+        </div>
+      </div>`;
+    });
+    html+='</div>';
+  }
+  document.getElementById('dash-atrasados').innerHTML=html;
+}
+
+function cobrarAtrasado(ci){
+  const c=db.clientes[ci];
+  const hoje=today();
+  const venc=[];
+  (c.parcelas||[]).forEach((p,pi)=>{if(!p.pago&&p.data&&p.data<hoje)venc.push({pi,p});});
+  if(!venc.length)return;
+  const total=venc.length*(c.valParc||0);
+  const loja=db.config.loja||'ControleFácil';
+  const pix=db.config.pix||'(chave pix não configurada)';
+  const lista=venc.map(v=>`• Parcela ${v.pi+1}/${c.parc} — venceu em ${fmtD(v.p.data)} — ${fmtV(c.valParc)}`).join('\n');
+  const msg=`Olá, ${c.nome}! 👋\n\nPassando para lembrar que sua compra está com pagamento em aberto:\n\nProduto: ${c.produto}\n${lista}\n\nTotal pendente: ${fmtV(total)}\n\nPague via Pix:\n${pix}\n\nQualquer dúvida é só me chamar! 💕\n\n— ${loja}`;
+  window.open(waLink(c.tel,msg),'_blank');
+}
+
 function initRelatorio(){
+  renderDashboard();
   // Preenche anos disponíveis
   const anos=new Set();
   const anoAtual=new Date().getFullYear();
