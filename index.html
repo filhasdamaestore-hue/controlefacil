@@ -1750,6 +1750,9 @@ async function salvarVenda(){
   renderPicker();
   renderClienteSel();
   alert(`✅ Venda registrada!\n\n👤 ${nome}\n🛍️ ${prod}\n💰 ${fmtV(valor)}${entrada>0?`\n💵 Entrada: ${fmtV(entrada)}`:''}\n${parc>1?`💳 ${parc}x de ${fmtV(valParc)} (${freq})`:'À vista'}`);
+  if(tel&&confirm(`📲 Enviar a confirmação da compra no WhatsApp para ${nome}?\n\nIsso documenta a venda por escrito e te protege.`)){
+    window.open(waLink(tel,msgConfirmacao(db.clientes[0])),'_blank');
+  }
   go('clientes');
 }
 
@@ -1822,6 +1825,7 @@ function renderCli(){
       <div class="ctot">${esc(c.produto)} • ${fmtV(c.valor)} • ${c.parc}x de ${fmtV(c.valParc)}</div>
       ${ph}
       <div class="cacts">
+        ${c.tel?`<button class="bsec" style="color:#1a8a4a;border-color:#A7E8C3" onclick="enviarConfirmacao(${ci})">📲 Confirmação</button>`:''}
         <button class="bsec bedt" onclick="abrirEdicaoCli(${ci})">✏️ Editar</button>
         <button class="bsec bext" onclick="abrirExtrato(${ci})">📄 Extrato</button>
         <button class="bsec bdng" style="margin-left:auto" onclick="delCli(${ci})">Excluir</button>
@@ -2100,6 +2104,26 @@ function parabenizar(ci){
   const loja=db.config.loja||'ControleFácil';
   const msg=`🎉🎂 Feliz aniversário, ${c.nome}!\n\nQue seu dia seja repleto de alegria e coisas boas!\n\nPassa aqui pra escolher um presente pra você — cliente especial merece carinho especial. 💕\n\n— ${loja}`;
   window.open(waLink(c.tel,msg),'_blank');
+}
+
+function msgConfirmacao(c){
+  const loja=db.config.loja||'ControleFácil';
+  const pix=db.config.pix||'(chave pix não configurada)';
+  let pgto='';
+  if(c.parc===1){
+    pgto=`Pagamento: à vista — ${fmtV(c.valor)} ✅`;
+  }else{
+    const freqN={mensal:'mensal',quinzenal:'quinzenal',semanal:'semanal'};
+    pgto=(c.entrada>0?`Entrada: ${fmtV(c.entrada)}\n`:'')+
+      `Parcelamento: ${c.parc}x de ${fmtV(c.valParc)} (${freqN[c.freq]||'mensal'})\n\nVencimentos:\n`+
+      c.parcelas.map((p,pi)=>`• ${pi+1}ª — ${fmtD(p.data)}${p.pago?' ✅ paga':''}`).join('\n');
+  }
+  return`Olá, ${c.nome}! 😊\n\nConfirmando sua compra:\n\n🛍️ ${c.produto}\n💰 Valor total: ${fmtV(c.valor)}\n${pgto}\n\nPague via Pix:\n${pix}\n\nQualquer dúvida é só me chamar. Obrigada pela confiança! 💕\n\n— ${loja}`;
+}
+function enviarConfirmacao(ci){
+  const c=db.clientes[ci];
+  if(!c.tel){alert('Cliente sem telefone cadastrado.');return;}
+  window.open(waLink(c.tel,msgConfirmacao(c)),'_blank');
 }
 
 function msgRecibo(c,pi){
