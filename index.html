@@ -503,6 +503,14 @@ textarea{resize:vertical;min-height:80px}
           </select>
         </div>
       </div>
+      <div class="r2">
+        <div class="fg"><label class="fl">Entrada/sinal (R$) <span style="color:var(--tx3);font-weight:400">— opcional</span></label><input id="f-entrada" type="number" placeholder="0,00" min="0" step="0.01"></div>
+        <div class="fg"><label class="fl">Frequência das parcelas</label>
+          <select id="f-freq">
+            <option value="mensal">Mensal</option><option value="quinzenal">Quinzenal (15 dias)</option><option value="semanal">Semanal</option>
+          </select>
+        </div>
+      </div>
       <div class="fg"><label class="fl">Data do 1º pagamento</label><input id="f-datapag" type="date"></div>
       <button class="bprim" onclick="salvarVenda()">✅ Registrar venda</button>
     </div>
@@ -511,6 +519,7 @@ textarea{resize:vertical;min-height:80px}
   <!-- CLIENTES -->
   <div class="sec" id="s-clientes">
     <div class="mg3" id="cli-met"></div>
+    <div class="fg" style="margin-bottom:1rem"><input id="cli-busca" type="text" placeholder="🔎 Buscar por nome, produto ou telefone..." oninput="buscarCli(this.value)"></div>
     <div id="lista-cli"></div>
   </div>
 
@@ -648,10 +657,12 @@ textarea{resize:vertical;min-height:80px}
       <div class="ctitle">Dados da sua loja</div>
       <div class="fg"><label class="fl">Nome da loja</label><input id="c-loja" type="text" placeholder="Ex: Boutique da Maria"></div>
       <div class="fg"><label class="fl">Chave Pix</label><input id="c-pix" type="text" placeholder="CPF, e-mail, telefone ou chave aleatória"></div>
+      <div class="fg"><label class="fl">🎯 Meta de vendas do mês (R$)</label><input id="c-meta" type="number" placeholder="Ex: 3000" min="0" step="0.01"></div>
       <div class="fg"><label class="fl">Mensagem de agradecimento</label>
         <textarea id="c-msg" placeholder="Obrigada pela sua confiança! &#10;Estamos sempre à disposição. 🙏"></textarea>
       </div>
       <button class="bprim" onclick="salvarCfg()">Salvar configurações</button>
+      <button class="bsec" style="width:100%;margin-top:10px;padding:11px" onclick="exportarPlanilha()">⬇️ Exportar tudo em planilha (Excel)</button>
     </div>
     <div class="card">
       <div class="ctitle">Preview da mensagem</div>
@@ -993,6 +1004,7 @@ function iniciarApp(){
   document.getElementById('c-loja').value=db.config.loja||'';
   document.getElementById('c-pix').value=db.config.pix||'';
   document.getElementById('c-msg').value=db.config.msg||'';
+  document.getElementById('c-meta').value=db.config.meta||'';
   document.getElementById('cx-data').value=today();
   updatePrev();
   renderPicker();
@@ -1081,11 +1093,32 @@ function renderDashboard(){
 
   atrasados.sort((a,b)=>b.dias-a.dias);
 
+  // ── Lucro do mês (vendas do mês − custo dos produtos vendidos)
+  const custoMes=vendasMes.reduce((a,c)=>a+(c.custo||0),0);
+  const lucroMes=vendidoMes-custoMes;
+  const temCusto=custoMes>0;
+
+  // ── Meta do mês
+  const meta=parseFloat(db.config.meta)||0;
+  let metaHtml='';
+  if(meta>0){
+    const pct=Math.min(100,Math.round(vendidoMes/meta*100));
+    const bateu=vendidoMes>=meta;
+    metaHtml=`<div class="met" style="grid-column:1/-1">
+      <div class="mlbl" style="margin-bottom:6px">🎯 Meta do mês: ${fmtV(meta)} — <strong style="color:${bateu?'var(--gr)':'var(--pk)'}">${pct}%</strong>${bateu?' 🎉 META BATIDA!':''}</div>
+      <div style="background:var(--sur2);border-radius:99px;height:14px;overflow:hidden">
+        <div style="width:${pct}%;height:100%;background:linear-gradient(90deg,var(--pk),${bateu?'var(--gr)':'var(--pk2)'});border-radius:99px;transition:width .5s"></div>
+      </div>
+    </div>`;
+  }
+
   // ── Cards
   document.getElementById('dash-cards').innerHTML=`
     <div class="met p"><div class="mval">${fmtV(vendidoMes)}</div><div class="mlbl">Vendido este mês (${vendasMes.length} venda${vendasMes.length===1?'':'s'})</div></div>
     <div class="met g"><div class="mval">${fmtV(recebidoMes)}</div><div class="mlbl">Recebido este mês</div></div>
     <div class="met t"><div class="mval">${fmtV(aReceberTotal)}</div><div class="mlbl">Na rua (a receber)</div></div>
+    <div class="met g" style="grid-column:1/-1"><div class="mval" style="color:${lucroMes>=0?'var(--gr)':'var(--rd)'}">${fmtV(lucroMes)}</div><div class="mlbl">💸 Lucro nas vendas do mês${temCusto?` (custo: ${fmtV(custoMes)})`:' — cadastre o custo dos produtos para um cálculo real'}</div></div>
+    ${metaHtml}
     <div class="met r" style="grid-column:1/-1;${atrasadoTotal>0?'background:var(--rd-bg)':''}">
       <div class="mval">${fmtV(atrasadoTotal)}</div>
       <div class="mlbl">${atrasados.length===0?'🎉 Nenhuma parcela em atraso':`🔴 Em atraso — ${atrasados.length} cliente${atrasados.length===1?'':'s'} devendo`}</div>
@@ -1201,6 +1234,8 @@ function gerarRelatorio(){
   const saidasMes=db.caixa.filter(m=>m.tipo==='saida'&&m.data&&m.data.startsWith(prefixo)&&m.valor>0);
 
   const totalVendas=vendasMes.reduce((a,c)=>a+c.valor,0);
+  const custoVendas=vendasMes.reduce((a,c)=>a+(c.custo||0),0);
+  const lucroVendas=totalVendas-custoVendas;
   const totalRecebido=parcelasRecMes.reduce((a,p)=>a+p.valor,0)+vendasMes.filter(c=>c.parc===1&&c.parcelas[0]?.pago).reduce((a,c)=>a+c.valor,0);
   const totalPendente=parcelasPendMes.reduce((a,p)=>a+p.valor,0);
   const totalSaidas=saidasMes.reduce((a,m)=>a+m.valor,0);
@@ -1216,7 +1251,9 @@ function gerarRelatorio(){
     <div class="met t"><div class="mval">${fmtV(totalRecebido)}</div><div class="mlbl">Recebido</div></div>
     <div class="met o"><div class="mval">${fmtV(totalPendente)}</div><div class="mlbl">A receber</div></div>
     <div class="met r"><div class="mval">${fmtV(totalSaidas)}</div><div class="mlbl">Saídas</div></div>
-    <div class="met"><div class="mval" style="color:${totalRecebido-totalSaidas>=0?'var(--gr)':'var(--rd)'}">${fmtV(totalRecebido-totalSaidas)}</div><div class="mlbl">Lucro líquido</div></div>`;
+    <div class="met"><div class="mval" style="color:var(--am)">${fmtV(custoVendas)}</div><div class="mlbl">Custo dos produtos</div></div>
+    <div class="met g"><div class="mval" style="color:${lucroVendas>=0?'var(--gr)':'var(--rd)'}">${fmtV(lucroVendas)}</div><div class="mlbl">💸 Lucro nas vendas</div></div>
+    <div class="met"><div class="mval" style="color:${totalRecebido-totalSaidas>=0?'var(--gr)':'var(--rd)'}">${fmtV(totalRecebido-totalSaidas)}</div><div class="mlbl">Caixa do mês (recebido − saídas)</div></div>`;
 
   // Gráfico — vendas por semana do mês
   const semanas=['Sem. 1','Sem. 2','Sem. 3','Sem. 4'];
@@ -1513,6 +1550,7 @@ async function salvarCfg(){
   db.config.loja=document.getElementById('c-loja').value.trim();
   db.config.pix=document.getElementById('c-pix').value.trim();
   db.config.msg=document.getElementById('c-msg').value.trim();
+  db.config.meta=parseFloat(document.getElementById('c-meta').value)||0;
   await saveCfg();updatePrev();alert('Configurações salvas!');
 }
 function updatePrev(){
@@ -1665,11 +1703,25 @@ async function salvarVenda(){
       if(t.qtd>0){t.qtd--;await saveProduto(db.produtos[item.prodIdx]);}
     }
   }
-  const valParc=valor/parc;
+  // Entrada/sinal (só para venda parcelada)
+  let entrada=parseFloat(document.getElementById('f-entrada').value)||0;
+  const freq=document.getElementById('f-freq').value||'mensal';
+  if(parc===1)entrada=0;
+  if(entrada>=valor&&parc>1){alert('A entrada não pode ser maior ou igual ao valor total.');return;}
+  // Custo dos produtos vendidos (para calcular lucro)
+  let custo=0;
+  carrinho.forEach(i=>{if(i.prodIdx!==null&&db.produtos[i.prodIdx])custo+=db.produtos[i.prodIdx].custo||0;});
+  const valParc=(valor-entrada)/parc;
   const parcelas=[];
   const base=new Date(datapag+'T12:00:00');
-  for(let i=0;i<parc;i++){const d=new Date(base);d.setMonth(d.getMonth()+i);parcelas.push({data:d.toISOString().split('T')[0],pago:false});}
-  const c={nome,nasc,tel,valor,parc,valParc,produto:prod,itens:[...carrinho],parcelas,criado:new Date().toISOString()};
+  for(let i=0;i<parc;i++){
+    const d=new Date(base);
+    if(freq==='quinzenal')d.setDate(d.getDate()+i*15);
+    else if(freq==='semanal')d.setDate(d.getDate()+i*7);
+    else d.setMonth(d.getMonth()+i);
+    parcelas.push({data:d.toISOString().split('T')[0],pago:false});
+  }
+  const c={nome,nasc,tel,valor,parc,valParc,entrada,freq,custo,produto:prod,itens:[...carrinho],parcelas,criado:new Date().toISOString()};
   await saveCliente(c);
   db.clientes.unshift(c);
   // ── CAIXA: só lança dinheiro que entrou DE VERDADE ──
@@ -1683,15 +1735,21 @@ async function salvarVenda(){
     await saveCliente(db.clientes[0]);
   }
   // A prazo: NADA entra no caixa agora — cada parcela é lançada quando for marcada como paga
+  // Exceção: se a cliente deu uma ENTRADA, esse dinheiro entrou de verdade hoje
+  if(parc>1&&entrada>0){
+    const m={tipo:'entrada',valor:entrada,desc:`Entrada/sinal: ${prod} (${nome})`,data:today(),cat:'venda'};
+    await saveMov(m);db.caixa.unshift(m);
+  }
   loading(false);
-  ['f-nome','f-nasc','f-tel','f-valor','f-datapag'].forEach(id=>document.getElementById(id).value='');
+  ['f-nome','f-nasc','f-tel','f-valor','f-datapag','f-entrada'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('f-freq').value='mensal';
   carrinho=[];pickProd=null;pickTam=null;
   document.getElementById('tam-wrap').style.display='none';
   document.getElementById('carrinho-wrap').style.display='none';
   document.getElementById('f-cliente-sel').value='';
   renderPicker();
   renderClienteSel();
-  alert(`✅ Venda registrada!\n\n👤 ${nome}\n🛍️ ${prod}\n💰 ${fmtV(valor)} em ${parc}x de ${fmtV(valParc)}`);
+  alert(`✅ Venda registrada!\n\n👤 ${nome}\n🛍️ ${prod}\n💰 ${fmtV(valor)}${entrada>0?`\n💵 Entrada: ${fmtV(entrada)}`:''}\n${parc>1?`💳 ${parc}x de ${fmtV(valParc)} (${freq})`:'À vista'}`);
   go('clientes');
 }
 
@@ -1704,7 +1762,12 @@ function mesQuitacao(c){
   c.parcelas.forEach(p=>{const d=p.pagoEm||p.data||'';if(d>max)max=d;});
   return max.slice(0,7);
 }
-let quitAberto={};
+let quitAberto={},cliBusca='';
+function buscarCli(v){cliBusca=(v||'').toLowerCase().trim();renderCli();}
+function bateBusca(c){
+  if(!cliBusca)return true;
+  return(c.nome||'').toLowerCase().includes(cliBusca)||(c.produto||'').toLowerCase().includes(cliBusca)||(c.tel||'').includes(cliBusca);
+}
 function toggleMesQuit(k){
   quitAberto[k]=!quitAberto[k];
   const el=document.getElementById('quit-'+k);
@@ -1717,6 +1780,7 @@ function renderCli(){
   const hoje=today();
   const ativos=[],quitados=[];
   db.clientes.forEach((c,ci)=>{
+    if(!bateBusca(c))return;
     const pagas=c.parcelas.filter(p=>p.pago).length;
     (pagas===c.parc?quitados:ativos).push({c,ci});
   });
@@ -1728,7 +1792,7 @@ function renderCli(){
     <div class="met g"><div class="mval">${quitados.length}</div><div class="mlbl">✅ Quitadas</div></div>`;
   if(!db.clientes.length){document.getElementById('lista-cli').innerHTML='<div class="empty">Nenhuma venda registrada.</div>';return;}
   let html='';
-  if(!ativos.length)html+='<div class="empty">🎉 Nenhuma compra em aberto. Todas quitadas!</div>';
+  if(!ativos.length)html+=`<div class="empty">${cliBusca?'Nenhum resultado para "'+esc(cliBusca)+'" em aberto.':'🎉 Nenhuma compra em aberto. Todas quitadas!'}</div>`;
   ativos.forEach(({c,ci})=>{
     const pagas=c.parcelas.filter(p=>p.pago).length;
     let ph='';
@@ -1745,6 +1809,7 @@ function renderCli(){
         <div class="ia">
           <span class="iv" style="color:${cor}">${fmtV(c.valParc)}</span>
           ${!p.pago&&c.tel?`<a href="${wl}" target="_blank"><button class="bwa bsm">WhatsApp</button></a>`:''}
+          ${p.pago&&c.tel?`<button class="bsec bsm" title="Enviar comprovante" onclick="enviarRecibo(${ci},${pi})">📩 Recibo</button>`:''}
           <button class="bsec bsm" onclick="togglePago(${ci},${pi})">${p.pago?'↩ Desfazer':'Marcar pago'}</button>
         </div>
       </div>`;
@@ -1779,7 +1844,7 @@ function renderCli(){
       const totalG=g.reduce((a,{c})=>a+(c.valor||0),0);
       let titulo='Sem data';
       if(k!=='sem-data'){const[ano,mes]=k.split('-');titulo=`${nomes[parseInt(mes)]} / ${ano}`;}
-      const aberto=!!quitAberto[k];
+      const aberto=!!quitAberto[k]||!!cliBusca;
       html+=`<div class="ir" style="cursor:pointer" onclick="toggleMesQuit('${k}')">
         <div class="ii" style="font-weight:600"><span id="seta-${k}">${aberto?'▾':'▸'}</span> ${titulo}</div>
         <div style="text-align:right;font-size:12px;color:var(--tx3)">${g.length} compra${g.length===1?'':'s'} • <span style="color:var(--gr);font-weight:600">${fmtV(totalG)}</span></div>
@@ -1814,6 +1879,9 @@ async function togglePago(ci,pi){
       const m={tipo:'entrada',valor:c.valParc,desc:`Parcela ${pi+1}/${c.parc} — ${c.nome} (${c.produto})`,data:today(),cat:'parcela'};
       await saveMov(m);db.caixa.unshift(m);
       p.movRid=m._rid||null;
+    }
+    if(c.tel&&confirm(`✅ Parcela marcada como paga!\n\nEnviar comprovante no WhatsApp para ${c.nome}?`)){
+      window.open(waLink(c.tel,msgRecibo(c,pi)),'_blank');
     }
   }else{
     // Desfazer: remove também o lançamento do caixa para não sobrar entrada fantasma
@@ -1949,26 +2017,101 @@ function renderHoje(){
   const hoje=today();
   const cobr=[];
   db.clientes.forEach((c,ci)=>c.parcelas.forEach((p,pi)=>{if(p.data===hoje&&!p.pago)cobr.push({c,ci,p,pi});}));
-  if(!cobr.length){document.getElementById('hoje-body').innerHTML='<div class="alrt">Nenhuma cobrança para hoje. Bom dia! ✨</div>';return;}
-  let html=`<div class="alrt">📋 Você tem <strong>${cobr.length} cobrança(s)</strong> para hoje.</div>`;
-  cobr.forEach(({c,ci,pi})=>{
-    const p=c.parcelas[pi];
-    const msg=buildMsg(c,c.valParc,pi+1,c.parc,fmtD(p.data));
-    const wl=c.tel?waLink(c.tel,msg):'';
-    html+=`<div class="hcard">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
-        <div><div class="cnome">${esc(c.nome)}</div><div class="csub">${esc(c.tel||'Sem telefone')} • Parcela ${pi+1}/${c.parc}</div></div>
-        <div style="font-size:18px;font-weight:700">${fmtV(c.valParc)}</div>
-      </div>
-      <div class="msgbox" style="white-space:pre-line">${msg.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
-      <div class="hacts">
-        ${wl?`<a href="${wl}" target="_blank" style="flex:1"><button class="bwa" style="width:100%;padding:10px">📲 Abrir no WhatsApp</button></a>`:''}
-        <button class="bsec" onclick="copiar(${ci},${pi})">Copiar mensagem</button>
-        <button class="bsec" onclick="pagoHoje(${ci},${pi})">Marcar pago ✓</button>
-      </div>
-    </div>`;
+
+  // Atrasadas (vencidas e não pagas) agrupadas por cliente
+  const atr=[];
+  db.clientes.forEach((c,ci)=>{
+    let qtd=0,val=0,prim=null;
+    c.parcelas.forEach(p=>{if(!p.pago&&p.data&&p.data<hoje){qtd++;val+=c.valParc||0;if(!prim||p.data<prim)prim=p.data;}});
+    if(qtd)atr.push({c,ci,qtd,val,dias:Math.floor((new Date(hoje+'T12:00:00')-new Date(prim+'T12:00:00'))/86400000)});
   });
+  atr.sort((a,b)=>b.dias-a.dias);
+
+  // Aniversariantes de hoje e amanhã (sem repetir cliente)
+  const amanha=(()=>{const d=new Date(hoje+'T12:00:00');d.setDate(d.getDate()+1);return d.toISOString().split('T')[0];})();
+  const mdHoje=hoje.slice(5),mdAmanha=amanha.slice(5);
+  const vistos=new Set(),nivers=[];
+  db.clientes.forEach((c,ci)=>{
+    if(!c.nasc)return;
+    const k=(c.tel||'')+'|'+c.nome;
+    if(vistos.has(k))return;
+    const md=c.nasc.slice(5);
+    if(md===mdHoje)  {nivers.push({c,ci,quando:'HOJE'});vistos.add(k);}
+    else if(md===mdAmanha){nivers.push({c,ci,quando:'amanhã'});vistos.add(k);}
+  });
+
+  let html='';
+
+  if(nivers.length){
+    html+=`<div class="card" style="border-color:var(--pk-bg)"><div class="ctitle" style="color:var(--pk)">🎂 Aniversariantes</div>`;
+    nivers.forEach(({c,ci,quando})=>{
+      html+=`<div class="ir">
+        <div class="ii"><div style="font-weight:600">${esc(c.nome)} <span class="bdg" style="background:var(--pk-bg);color:var(--pk);margin-left:4px">${quando}</span></div>
+        <div style="font-size:12px;color:var(--tx3)">${fmtD(c.nasc)}</div></div>
+        ${c.tel?`<button class="bwa" onclick="parabenizar(${ci})">🎉 Dar parabéns</button>`:''}
+      </div>`;
+    });
+    html+='</div>';
+  }
+
+  if(atr.length){
+    const totAtr=atr.reduce((a,x)=>a+x.val,0);
+    html+=`<div class="card" style="border-color:var(--rd-bg)"><div class="ctitle" style="color:var(--rd)">⚠️ Em atraso — ${fmtV(totAtr)}</div>`;
+    atr.forEach(a=>{
+      html+=`<div class="ir">
+        <div class="ii"><div style="font-weight:600">${esc(a.c.nome)}</div>
+        <div style="font-size:12px;color:var(--rd)">${a.qtd} parcela${a.qtd===1?'':'s'} • ${a.dias} dia${a.dias===1?'':'s'} de atraso • ${fmtV(a.val)}</div></div>
+        <div style="display:flex;gap:6px">
+          ${a.c.tel?`<button class="bwa bsm" onclick="cobrarAtrasado(${a.ci})">💬 Cobrar</button>`:''}
+          <button class="bsec bsm" onclick="abrirExtrato(${a.ci})">Ver</button>
+        </div>
+      </div>`;
+    });
+    html+='</div>';
+  }
+
+  if(cobr.length){
+    html+=`<div class="alrt">📋 Você tem <strong>${cobr.length} cobrança(s)</strong> para hoje.</div>`;
+    cobr.forEach(({c,ci,pi})=>{
+      const p=c.parcelas[pi];
+      const msg=buildMsg(c,c.valParc,pi+1,c.parc,fmtD(p.data));
+      const wl=c.tel?waLink(c.tel,msg):'';
+      html+=`<div class="hcard">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+          <div><div class="cnome">${esc(c.nome)}</div><div class="csub">${esc(c.tel||'Sem telefone')} • Parcela ${pi+1}/${c.parc}</div></div>
+          <div style="font-size:18px;font-weight:700">${fmtV(c.valParc)}</div>
+        </div>
+        <div class="msgbox" style="white-space:pre-line">${msg.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
+        <div class="hacts">
+          ${wl?`<a href="${wl}" target="_blank" style="flex:1"><button class="bwa" style="width:100%;padding:10px">📲 Abrir no WhatsApp</button></a>`:''}
+          <button class="bsec" onclick="copiar(${ci},${pi})">Copiar mensagem</button>
+          <button class="bsec" onclick="pagoHoje(${ci},${pi})">Marcar pago ✓</button>
+        </div>
+      </div>`;
+    });
+  }
+
+  if(!html)html='<div class="alrt">Nenhuma cobrança para hoje e ninguém em atraso. Bom dia! ✨</div>';
   document.getElementById('hoje-body').innerHTML=html;
+}
+
+function parabenizar(ci){
+  const c=db.clientes[ci];
+  const loja=db.config.loja||'ControleFácil';
+  const msg=`🎉🎂 Feliz aniversário, ${c.nome}!\n\nQue seu dia seja repleto de alegria e coisas boas!\n\nPassa aqui pra escolher um presente pra você — cliente especial merece carinho especial. 💕\n\n— ${loja}`;
+  window.open(waLink(c.tel,msg),'_blank');
+}
+
+function msgRecibo(c,pi){
+  const loja=db.config.loja||'ControleFácil';
+  const pagas=c.parcelas.filter(p=>p.pago).length;
+  const quitou=pagas===c.parc;
+  return`Olá, ${c.nome}! ✅\n\nConfirmamos o recebimento da parcela ${pi+1}/${c.parc} no valor de ${fmtV(c.valParc)}.\n\nProduto: ${c.produto}\n${quitou?'🎉 Compra QUITADA! Muito obrigada pela confiança!':`Faltam ${c.parc-pagas} parcela(s).`}\n\n— ${loja}`;
+}
+function enviarRecibo(ci,pi){
+  const c=db.clientes[ci];
+  if(!c.tel){alert('Cliente sem telefone cadastrado.');return;}
+  window.open(waLink(c.tel,msgRecibo(c,pi)),'_blank');
 }
 function copiar(ci,pi){
   const c=db.clientes[ci],p=c.parcelas[pi];
@@ -1984,6 +2127,9 @@ async function pagoHoje(ci,pi){
     p.movRid=m._rid||null;
   }
   await saveCliente(c);
+  if(c.tel&&confirm(`✅ Parcela marcada como paga!\n\nEnviar comprovante no WhatsApp para ${c.nome}?`)){
+    window.open(waLink(c.tel,msgRecibo(c,pi)),'_blank');
+  }
   renderHoje();
 }
 
@@ -2225,10 +2371,42 @@ async function delMov(rid){
   db.caixa=db.caixa.filter(m=>m._rid!==rid);
   renderCaixa();
 }
+function exportarPlanilha(){
+  const num=v=>Number(v||0).toFixed(2).replace('.',',');
+  const cel=s=>'"'+String(s||'').replace(/"/g,'""')+'"';
+  const L=[];
+  L.push('VENDAS E PARCELAS');
+  L.push(['Cliente','Telefone','Produto','Valor total','Entrada','Parcelas','Valor parcela','Parcela nº','Vencimento','Status','Pago em'].join(';'));
+  db.clientes.forEach(c=>{
+    c.parcelas.forEach((p,pi)=>{
+      L.push([cel(c.nome),cel(c.tel),cel(c.produto),num(c.valor),num(c.entrada),c.parc,num(c.valParc),(pi+1)+'/'+c.parc,fmtD(p.data),p.pago?'PAGA':'PENDENTE',p.pagoEm?fmtD(p.pagoEm):''].join(';'));
+    });
+  });
+  L.push('');L.push('CAIXA');
+  L.push(['Data','Tipo','Categoria','Descrição','Valor'].join(';'));
+  db.caixa.forEach(m=>{
+    L.push([fmtD(m.data),m.tipo==='entrada'?'ENTRADA':'SAÍDA',cel(m.cat),cel(m.desc),(m.tipo==='entrada'?'':'-')+num(m.valor)].join(';'));
+  });
+  L.push('');L.push('ESTOQUE');
+  L.push(['Produto','Categoria','Preço à vista','Preço a prazo','Custo','Tamanho','Quantidade'].join(';'));
+  db.produtos.forEach(p=>{
+    if(p.tamanhos&&p.tamanhos.length)p.tamanhos.forEach(t=>L.push([cel(p.nome),cel(p.cat),num(p.precoVista||p.preco),num(p.precoPrazo||p.preco),num(p.custo),cel(t.tam),t.qtd].join(';')));
+    else L.push([cel(p.nome),cel(p.cat),num(p.precoVista||p.preco),num(p.precoPrazo||p.preco),num(p.custo),'',''].join(';'));
+  });
+  const blob=new Blob(['\ufeff'+L.join('\r\n')],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`controlefacil_${today()}.csv`;
+  a.click();URL.revokeObjectURL(a.href);
+  alert('✅ Planilha baixada! Abre direto no Excel ou Google Planilhas. Guarde como segurança extra.');
+}
+
 async function limparCaixa(){
-  if(!confirm('Limpar todo o histórico?'))return;
+  const resp=prompt('⚠️ ATENÇÃO: isso apaga TODO o histórico do caixa e não tem como desfazer.\n\nPara confirmar, digite APAGAR em letras maiúsculas:');
+  if(resp!=='APAGAR'){if(resp!==null)alert('Cancelado. Nada foi apagado.');return;}
+  loading(true);
   for(const m of db.caixa){if(m._rid)await deletarMov(m._rid);}
-  db.caixa=[];renderCaixa();
+  db.caixa=[];loading(false);renderCaixa();
 }
 
 // ══════════════════════════════════════
